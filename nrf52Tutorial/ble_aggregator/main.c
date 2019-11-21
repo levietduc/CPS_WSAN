@@ -52,6 +52,7 @@
 #include "nordic_common.h"
 #include "nrf_sdh.h"
 #include "nrf_sdh_ble.h"
+
 #include "app_timer.h"
 #include "bsp_btn_ble.h"
 #include "ble.h"
@@ -72,11 +73,23 @@
 #include "nrf_log_ctrl.h"
 #include "nrf_log_default_backends.h"
 
+//vinh
+#include "nrf_delay.h"
+#include "ble_advertising.h"
+
 #define APP_BLE_CONN_CFG_TAG      1                                     /**< A tag that refers to the BLE stack configuration we set with @ref sd_ble_cfg_set. Default tag is @ref APP_BLE_CONN_CFG_TAG. */
 #define APP_BLE_OBSERVER_PRIO     3                                     /**< Application's BLE observer priority. You shouldn't need to modify this value. */
 
 // Peripheral parameters
-#define DEVICE_NAME                  "Aggregator"                       /**< Name of device. Will be included in the advertising data. */
+
+/*------------
+//student: CLuster head Configuration
+----------*/
+#define CLUSTER_ID      2
+#define DEVICE_NAME             "CLH"                    /**< Name of device. Will be included in the advertising data. */
+
+//#define DEVICE_NAME                  "NT:1"                       /**< Name of device. Will be included in the advertising data. */
+
 #define AGG_CFG_SERVICE_UUID_TYPE    BLE_UUID_TYPE_VENDOR_BEGIN         /**< UUID type for the Nordic UART Service (vendor specific). */
 #define MIN_PERIPHERAL_CON_INT       MSEC_TO_UNITS(100, UNIT_1_25_MS)    /**< Determines minimum connection interval in milliseconds. */
 #define MAX_PERIPHERAL_CON_INT       MSEC_TO_UNITS(200, UNIT_1_25_MS)   /**< Determines maximum connection interval in milliseconds. */
@@ -98,6 +111,7 @@
 #define CENTRAL_DISCONNECT_BUTTON   BSP_BUTTON_0                        /**< Button that will write to the LED characteristic of the peer. */
 #define SCAN_START_STOP_BUTTON      BSP_BUTTON_1
 #define LEDBUTTON_BUTTON            BSP_BUTTON_2
+#define TEST_BUTTON            BSP_BUTTON_3
 
 #define BUTTON_DETECTION_DELAY      APP_TIMER_TICKS(50)                 /**< Delay from a GPIOTE event until a button is reported as pushed (in number of timer ticks). */
 
@@ -113,7 +127,10 @@
 #define UUID16_SIZE                 2                                   /**< Size of a UUID, in bytes. */
 
 #define THINGY_RSSI_CONNECT_LIMIT   -55
-
+//vinh add
+#define CLUSTERHEAD_RSSI_CONNECT_LIMIT   -55
+#define MAX_USERDATA_BUFFER_BLOCK 16
+#define MAX_USERDATA_BUFFER_BLOCKSIZE 32
 #ifdef NRF52840_XXAA
 #define APP_DEFAULT_TX_POWER        8
 #else
@@ -132,9 +149,18 @@ APP_TIMER_DEF(m_adv_led_blink_timer_id);
 APP_TIMER_DEF(m_scan_led_blink_timer_id);
 APP_TIMER_DEF(m_post_message_delay_timer_id);
 
+//vinh change
 static char const m_target_periph_name[] = "NT:";                       /**< Name of the device we try to connect to. This name is searched for in the scan report data*/
-static char const m_target_blinky_name[] = "MLThingy";
+//static char const m_target_periph_name[] = "Aggregator";
+//static char const m_target_blinky_name[] = "MLThingy";
+static char const m_target_blinky_name[] = "Thingy";
+
+//static char m_target_blinky_name[5];
+ 
+
 //static volatile bool m_service_discovery_in_process = false;
+static char  m_target_clusterhead_name[20]=DEVICE_NAME;
+
 
 static uint16_t   m_service_discovery_conn_handle = BLE_CONN_HANDLE_INVALID;
 static uint16_t   m_coded_phy_conn_handle[NRF_SDH_BLE_TOTAL_LINK_COUNT];
@@ -155,6 +181,59 @@ static ret_code_t led_status_send_by_mask(uint8_t button_state, uint8_t r, uint8
 static ret_code_t led_status_on_off_send_by_mask(bool on, uint32_t mask);
 static ret_code_t post_connect_message(uint8_t conn_handle);
 static void       advertising_start(void);
+
+
+//vinh
+/*@brief: check the destination of incoming broadcast msg is to current node 
+@input: data to check
+byte[1] of data->p_data is the destination 
+@output: true if byte[1] match CLUSTER_ID
+*/
+bool vf_check_destination(uint8_array_t *data);
+static void vf_start_broadcast_data(void);
+static void vf_start_broadcast_data2(void);
+static void vf_stop_broadcast_data(void);
+void relay_adv_data2(void);
+/*  
+@brief: add a packet to buffer for advertising
+@input: data 
+@output: error=1  if buffer is full*/
+uint8_t vf_add_packet_to_buffer(uint8_array_t *data);
+uint8_t vf_add_packet_to_buffer2(uint8_array_t *data);
+/*  
+@brief: check the destination of original incoming broadcast msg is from current node
+@input: data to check
+byte[0] of data->p_data is the source 
+@output: true if byte[0] match CLUSTER_ID*/
+bool vf_check_source(uint8_array_t *data);
+
+void vf_process_adv_command(uint8_array_t *data);
+void relay_adv_data(void);
+
+//check position of packet in buffer array
+//by comparing the 1st 3 bytes:
+//  1st: destination id of broadcast
+//  2nd: source id of broadcast
+//  3rd: packet id
+//return position if packet is found (all 3 bytes matched)
+//or 0xFFFF if no match packet in buffer
+
+static uint16_t vf_validate_relay_packet(uint8_array_t *checkdata);
+static uint16_t vf_validate_relay_packet2(uint8_array_t *checkdata);
+/*
+@modify relay data by increasing TTL, byte[2] of input
+*/
+static void vf_modify_relay_data(uint8_array_t *checkdata);
+//vinh
+//add for userdata
+#define MAX_USERDATA_BUFFER MAX_USERDATA_BUFFER_BLOCK*MAX_USERDATA_BUFFER_BLOCKSIZE
+static uint8_t garr_userdata[MAX_USERDATA_BUFFER];
+uint8_array_t g_userdata={
+  .size=0,.p_data=garr_userdata};
+uint16_t g_userdata_lastpos=0;
+uint16_t g_userdata_firstpos=0;
+uint16_t g_userdata_currpos=0;
+
 
 #define ENABLE_PIN_DEBUGGING 0
 
@@ -237,7 +316,7 @@ static ble_gap_conn_params_t const m_connection_param =
 
 void uart_printf(const char *fmt, ...)
 {
-    char buf[120], *p;
+    char buf[256], *p;
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
@@ -277,9 +356,11 @@ static void gap_params_init(void)
 
     BLE_GAP_CONN_SEC_MODE_SET_OPEN(&sec_mode);
 
-    err_code = sd_ble_gap_device_name_set(&sec_mode,
-                                          (const uint8_t *) DEVICE_NAME,
-                                          strlen(DEVICE_NAME));
+    //vinh
+    //err_code = sd_ble_gap_device_name_set(&sec_mode,(const uint8_t *) DEVICE_NAME,strlen(DEVICE_NAME));
+
+    err_code = sd_ble_gap_device_name_set(&sec_mode,(const uint8_t *) m_target_clusterhead_name,strlen(m_target_clusterhead_name));
+
     APP_ERROR_CHECK(err_code);
 
     memset(&gap_conn_params, 0, sizeof(gap_conn_params));
@@ -537,16 +618,157 @@ static void thingy_uis_c_evt_handler(ble_thingy_uis_c_t * p_thingy_uis_c, ble_th
 }
 
 
+bool vf_check_source(uint8_array_t *data)
+{
+  if((data->p_data[0])==CLUSTER_ID) return true;
+  else return false;
+}
+
+bool vf_check_destination(uint8_array_t *data)
+{
+  if((data->p_data[1])==CLUSTER_ID) return true;
+  else return false;
+}
+
+uint8_t vf_add_packet_to_buffer(uint8_array_t *data)
+{
+  uint8_array_t *userdata=data;
+  uint8_t err_code=0;
+  size_t trim_pos,i;
+  if((g_userdata.size+userdata->size+1)<=MAX_USERDATA_BUFFER)
+  {//buffer not overflow
+      g_userdata.size+=userdata->size+1;
+      g_userdata.p_data[g_userdata_lastpos++]=userdata->size+1;
+
+      if((g_userdata_lastpos+userdata->size)>=MAX_USERDATA_BUFFER)
+      {
+          memcpy(&g_userdata.p_data[g_userdata_lastpos],userdata->p_data,MAX_USERDATA_BUFFER-g_userdata_lastpos);
+          trim_pos=MAX_USERDATA_BUFFER-g_userdata_lastpos;
+          g_userdata_lastpos=userdata->size-(MAX_USERDATA_BUFFER-g_userdata_lastpos);
+          memcpy(&g_userdata.p_data[0],&userdata->p_data[trim_pos],g_userdata_lastpos);
+      }
+      else
+      {
+         memcpy(&g_userdata.p_data[g_userdata_lastpos],userdata->p_data,userdata->size);
+         g_userdata_lastpos+=userdata->size;
+      }
+      uart_printf("@%d $%d $%d *",g_userdata_lastpos,userdata->size,g_userdata.size);
+      if(g_userdata_firstpos+g_userdata.size<MAX_USERDATA_BUFFER)
+      {
+          for(i=g_userdata_firstpos;i<g_userdata_firstpos+g_userdata.size;i++)
+          {
+           uart_printf("%d ", g_userdata.p_data[i]);
+            //sprintf(str_uart, "%d ",userdata.p_data[i]);
+          }
+      }
+      else
+      {
+            for(i=g_userdata_firstpos;i<MAX_USERDATA_BUFFER;i++)
+            {
+             uart_printf("%d ", g_userdata.p_data[i]);
+            //sprintf(str_uart, "%d ",userdata.p_data[i]);
+            }
+            for(i=0;i<g_userdata_lastpos;i++)
+            {
+             uart_printf("%d ", g_userdata.p_data[i]);
+            //sprintf(str_uart, "%d ",userdata.p_data[i]);
+            }
+      }
+      uart_printf("\n\r");
+  }//end buffer not full
+  else
+  {
+    uart_printf("Buffer full");
+    err_code=1;
+  }
+  return err_code;
+}
+
+
+uint8_t vf_add_packet_to_buffer2(uint8_array_t *data)
+{
+//each block include 32 bytes
+//byte 0: block property: 0x0: free, 0xFF: used
+//byte 1: pointer to next available block,0xFF is NULL
+//byte 2: pointer to previous available block,0xFF is NULL
+//byte 4..n:size + data
+//g_userdata_lastpos: position of last block in buffer
+//g_userdata_firstpos: position of last block in buffer
+  uint8_array_t *userdata=data;
+  uint8_t err_code=1;
+  size_t pos,i;
+  if((g_userdata.size)<MAX_USERDATA_BUFFER_BLOCK)
+  {//buffer not overflow
+
+      for(i=0;i<MAX_USERDATA_BUFFER_BLOCK;i++)
+      {
+        if(g_userdata.p_data[i*MAX_USERDATA_BUFFER_BLOCKSIZE]==0) //found free block
+        {
+          err_code=0;
+          break;
+        }
+      }
+      
+      if(err_code==0)
+      {  
+      //found free block
+        pos=i;
+        if( g_userdata.size==0)
+        {
+          g_userdata.p_data[pos*32+1]=g_userdata.p_data[pos*32+2]=0xFF; 
+          g_userdata_currpos=g_userdata_lastpos=g_userdata_firstpos=pos;
+        }
+        else
+        {
+          g_userdata.p_data[g_userdata_lastpos*32+1]=pos; //update previous "next block pointer"
+          g_userdata.p_data[pos*32+2]=g_userdata_lastpos; //update current "pre block pointer"
+          g_userdata_lastpos=pos; //update last position
+        }
+        g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE]=0xFF;  //mark as used block
+        g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+4]=userdata->size+1; //number of data byte in this block, include this byte
+        memcpy(&g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+5],userdata->p_data,userdata->size);
+        g_userdata.size++; 
+      }
+  
+
+  }//end buffer not full
+
+  if (err_code==0)
+  {
+       uart_printf("@%d $%d $%d *",g_userdata.size,g_userdata_lastpos,userdata->size); 
+       for(i=0;i<userdata->size+1+4;i++)
+       {
+          uart_printf("%d ", g_userdata.p_data[g_userdata_lastpos*MAX_USERDATA_BUFFER_BLOCKSIZE+i]);
+       }
+      uart_printf("\n\r");
+  }
+  else
+  {
+    uart_printf("Buffer full");
+  }
+  return err_code;
+}
+
 /**@brief Function for handling the advertising report BLE event.
  *
  * @param[in] p_adv_report  Advertising report from the SoftDevice.
  */
+
+//vinh temp
+static char str_uart[128];
+static uint16_t str_uart_len=0;
+
+
+
 static void on_adv_report(ble_evt_t const * p_ble_evt)
 {
     uint32_t      err_code;
     uint8_array_t adv_data;
     uint8_array_t dev_name;
     uint8_array_t service_uuid;
+    //vinh
+    uint8_array_t userdata;
+    size_t i,trim_pos;
     //NRF_LOG_INFO("ADV");
 
     if (m_device_being_connected_info.dev_type == DEVTYPE_NONE)
@@ -561,7 +783,7 @@ static void on_adv_report(ble_evt_t const * p_ble_evt)
         adv_data.size   = p_gap_evt->params.adv_report.data.len;
 
         // Search for advertising names.
-        bool found_name = false, found_blinky_name = false;
+        bool found_name = false, found_blinky_name = false,found_clusterhead_data=false;
         err_code = adv_report_parse(BLE_GAP_AD_TYPE_COMPLETE_LOCAL_NAME,
                                     &adv_data,
                                     &dev_name);
@@ -602,44 +824,119 @@ static void on_adv_report(ble_evt_t const * p_ble_evt)
                     }
                     m_device_being_connected_info.dev_type = DEVTYPE_BLINKY;
                 }
-                else if(memcmp(m_target_blinky_name, dev_name.p_data, strlen(m_target_blinky_name)) == 0)
+                else if(memcmp(m_target_blinky_name, dev_name.p_data, strlen(m_target_blinky_name)) == 0) //vinh, m_target_blinky_name -> THINGY
                 {
-                    found_blinky_name = true;
-                }
-            }
-        }
-        
-        // Look for Thingy UUID
-        // Filter on RSSI to avoid connecting to everything in the room
-        const uint8_t thingy_service_uuid[] = {0x42, 0x00, 0x74, 0xA9, 0xFF, 0x52, 0x10, 0x9B, 0x33, 0x49, 0x35, 0x9B, 0x00, 0x01, 0x68, 0xEF};
-        if(p_gap_evt->params.adv_report.rssi > THINGY_RSSI_CONNECT_LIMIT || found_blinky_name)
-        {
-            err_code = adv_report_parse(BLE_GAP_AD_TYPE_128BIT_SERVICE_UUID_MORE_AVAILABLE, &adv_data, &service_uuid);
-            if (err_code == NRF_SUCCESS)
-            {
-                if (memcmp(service_uuid.p_data, thingy_service_uuid, 16) == 0)
-                {
-                    NRF_LOG_INFO(found_blinky_name ? "Named Thingy!!" : "Thingy!!");
-                    if(found_name)
-                    {
-                        memcpy(m_device_name_being_connected_to, 
-                               dev_name.p_data, dev_name.size);
-                        m_device_name_being_connected_to[dev_name.size] = 0;
-                    }
-                    m_device_being_connected_info.dev_type = DEVTYPE_THINGY;
-                }
-            }
-        }
 
-        if (m_device_being_connected_info.dev_type != DEVTYPE_NONE)
-        {
-            m_device_being_connected_info.phy = m_scan_params.scan_phys;
-            
-            // Initiate connection.
-            err_code = sd_ble_gap_connect(peer_addr, &m_scan_params, &m_connection_param, APP_BLE_CONN_CFG_TAG);
-            if (err_code != NRF_SUCCESS)
+                    found_blinky_name = true;
+                    //vinh, not add Thingy to the list here since check RSSI at below code 
+                }
+
+
+                //else if(memcmp(m_target_clusterhead_name, dev_name.p_data, strlen(m_target_clusterhead_name)) == 0) //vinh, m_target_clusterhead_name -> CLUSTERHEAD
+ 
+                /*--------------------------------
+                //student: advertising receive--
+                ------------------------*/
+                else if(memcmp((const uint8_t *) DEVICE_NAME, dev_name.p_data, strlen((const uint8_t *) DEVICE_NAME)) == 0) //vinh, m_target_clusterhead_name -> CLUSTERHEAD
+              {//found clusterhead name
+                  found_clusterhead_data= true;
+
+                  strcpy(str_uart,"find cluster head \n\r");
+                  uart_printf(str_uart, strlen(str_uart));//print to COM port
+
+                  //parse user data
+                  err_code = adv_report_parse(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA, &adv_data, &userdata);
+                  if((err_code == NRF_SUCCESS)&&(p_gap_evt->params.adv_report.rssi >-65))
+                  {//have user data
+                    strcpy(str_uart,"find userdata, \n\r");
+                    uart_printf(str_uart, strlen(str_uart));
+                    uart_printf("$RSSI %d \n\r",p_gap_evt->params.adv_report.rssi);                    
+                      
+                    if(vf_check_source(&userdata)==true)
+                    {//message return to source, do nothing
+                       strcpy(str_uart,"reflect data userdata \n\r");
+                       uart_printf(str_uart, strlen(str_uart)); //print to COM port
+                    }
+
+                    else
+                    {//message from another source
+                        if(vf_check_destination(&userdata)==true)
+                        {//match destination -> process data
+                            vf_process_adv_command(&userdata);  
+                            strcpy(str_uart,"process data \n\r");
+                            uart_printf(str_uart, strlen(str_uart));  //print to COM port
+                            i=0xFFFE;
+                        }
+                        else 
+                        {//not destination ->validate packet(check redundant packet in buffer)
+                            // ->relay data
+                          //i=vf_validate_relay_packet(&userdata);
+                          i=vf_validate_relay_packet2(&userdata); 
+                        }
+                      if((i==0xFFFF)||(i==0xFFFE))
+                      {//new packet
+                        if(i=0xFFFF){
+                          //vf_modify_relay_data(&userdata); //increase TTL before relay
+                        }
+                        //err_code=vf_add_packet_to_buffer(&userdata);
+                        err_code=vf_add_packet_to_buffer2(&userdata); //add packet to buffer for advertising
+                      }//end new packet
+                      else
+                      {
+                        uart_printf("Redundant packet\n\r");
+                      }
+                      
+                    }//end message from another source
+
+                    //relay_adv_data(); //broad cast buffer
+
+                  }//end having user data
+              }//end found cluster head
+            }
+            relay_adv_data2();  //broadcast next packet in buffer
+            /*-----------------
+            end clusterhead advertising recevier handler
+            ---------------------*/
+
+        
+            // Look for Thingy UUID
+            // Filter on RSSI to avoid connecting to everything in the room
+            const uint8_t thingy_service_uuid[] = {0x42, 0x00, 0x74, 0xA9, 0xFF, 0x52, 0x10, 0x9B, 0x33, 0x49, 0x35, 0x9B, 0x00, 0x01, 0x68, 0xEF};
+            //vinh change
+            //if(p_gap_evt->params.adv_report.rssi > THINGY_RSSI_CONNECT_LIMIT || found_blinky_name)
+            if(p_gap_evt->params.adv_report.rssi > THINGY_RSSI_CONNECT_LIMIT && found_blinky_name)
             {
-                NRF_LOG_ERROR("Connection Request Failed, reason %d", err_code);
+                err_code = adv_report_parse(BLE_GAP_AD_TYPE_128BIT_SERVICE_UUID_MORE_AVAILABLE, &adv_data, &service_uuid);
+                if (err_code == NRF_SUCCESS)
+                {
+                    if (memcmp(service_uuid.p_data, thingy_service_uuid, 16) == 0)
+                    {
+                        NRF_LOG_INFO(found_blinky_name ? "Named Thingy!!" : "Thingy!!");
+                        if(found_name)
+                        {
+                            memcpy(m_device_name_being_connected_to, 
+                                   dev_name.p_data, dev_name.size);
+                            m_device_name_being_connected_to[dev_name.size] = 0;
+                        }
+                        m_device_being_connected_info.dev_type = DEVTYPE_THINGY;
+                    }
+                }
+            }
+
+        
+
+
+            if ((m_device_being_connected_info.dev_type != DEVTYPE_NONE)&& (found_clusterhead_data==false))
+            //vinh, add cluster head to check condition   
+            {
+                m_device_being_connected_info.phy = m_scan_params.scan_phys;
+            
+                // Initiate connection.
+                err_code = sd_ble_gap_connect(peer_addr, &m_scan_params, &m_connection_param, APP_BLE_CONN_CFG_TAG);
+                if (err_code != NRF_SUCCESS)
+                {
+                    NRF_LOG_ERROR("Connection Request Failed, reason %d", err_code);
+                }
             }
         }
     }
@@ -666,6 +963,8 @@ static uint8_t peer_addr_LR[NRF_SDH_BLE_CENTRAL_LINK_COUNT][6];
  * @param[in]   p_ble_evt   Bluetooth stack event.
  * @param[in]   p_context   Unused.
  */
+
+ //vinh 0, important function
 static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
 {
     ret_code_t err_code;
@@ -988,14 +1287,496 @@ static void ble_stack_init(void)
     NRF_SDH_BLE_OBSERVER(m_ble_observer, APP_BLE_OBSERVER_PRIO, ble_evt_handler, NULL);
 }
 
-#define ADV_MAX_LENGTH 31
+#define ADV_MAX_LENGTH  31 
 static uint8_t m_adv_handle = 0;
+static uint8_t m_adv_handle2 = 0;
 static ble_advdata_t adv_data = {0}; 
 static uint8_t adv_data_buf[ADV_MAX_LENGTH];
+static uint8_t m_adv_data_buf[ADV_MAX_LENGTH];
+static uint8_t m_sr_data_buf[ADV_MAX_LENGTH];
+//static uint8_t adv_data_buf2[ADV_MAX_LENGTH];
+static uint8_t rolling_count=0;
+
 static ble_advdata_t sr_data = {0}; 
 static uint8_t sr_data_buf[ADV_MAX_LENGTH];
 static ble_gap_adv_data_t adv_packet;
+static ble_gap_adv_data_t adv_packet2;
 static ble_gap_adv_params_t adv_params = {0};
+static ble_gap_adv_params_t adv_params2 = {0};
+static int org_adv_data_size=0;
+
+static ble_advertising_t  gp_advertising={
+.adv_data.adv_data.p_data=m_adv_data_buf,
+.adv_data.adv_data.len=ADV_MAX_LENGTH,
+.adv_data.scan_rsp_data.p_data=m_sr_data_buf,
+.adv_data.scan_rsp_data.len=ADV_MAX_LENGTH
+};
+
+
+
+void relay_adv_data(void)
+{
+
+    ret_code_t err_code;
+    uint8_t i;
+
+    uint8_t advlen=org_adv_data_size;
+    static uint8_t relay_data[32];
+     uint16_t pos=g_userdata_firstpos;
+    uint8_t relay_size=g_userdata.p_data[pos++];
+    if(g_userdata.size>0)
+    {
+      while(1)
+      {
+          pos=g_userdata_firstpos;
+          relay_size=g_userdata.p_data[pos++];
+          if((relay_size==0)||(g_userdata.size>MAX_USERDATA_BUFFER)\
+                    ||(g_userdata_firstpos==g_userdata_lastpos))
+          {//reset array
+            g_userdata_firstpos=g_userdata_lastpos;
+            g_userdata.p_data[g_userdata_firstpos]=0;
+            g_userdata.size=0;
+            break;
+          }
+          else
+          {
+            g_userdata.size-=relay_size;
+            relay_data[0]=relay_size+1;
+            relay_data[1]=0xff; //type: MANU
+           
+            if(g_userdata_firstpos+relay_size<MAX_USERDATA_BUFFER)
+            {
+              memcpy(&relay_data[2],&g_userdata.p_data[pos],relay_size-1);
+              g_userdata_firstpos+=relay_size;
+            }
+            else
+            {
+              memcpy(&relay_data[2],&g_userdata.p_data[pos],MAX_USERDATA_BUFFER-pos);
+              memcpy(&relay_data[2+MAX_USERDATA_BUFFER-pos],&g_userdata.p_data[0],relay_size-(MAX_USERDATA_BUFFER-pos)-1);
+              g_userdata_firstpos=relay_size-(MAX_USERDATA_BUFFER-pos)-1;
+            }
+
+            if(relay_data[5]<8) 
+            {
+              //g_userdata.p_data[1]+=1;
+              //adv_packet.adv_data.p_data[advlen++]=g_userdata.size+1; //length
+              //adv_packet.adv_data.p_data[advlen++]=0xff; //type
+              //memcpy(&adv_packet.adv_data.p_data[advlen],g_userdata.p_data,g_userdata.size);
+              memcpy(&adv_packet.adv_data.p_data[advlen],relay_data,relay_size+1);
+              adv_packet.adv_data.len=org_adv_data_size+relay_size+1;
+    
+
+
+             uart_printf("hello %d hello @%d ",adv_packet.adv_data.len,g_userdata_firstpos );
+             for(int i=0;i<adv_packet.adv_data.len;i++)
+              {
+                uart_printf("%d  ",adv_packet.adv_data.p_data[i] );
+              }
+              uart_printf("\n\r");
+              //nrf_delay_ms(100);
+
+             break;
+
+            }
+          }
+      }//while
+    }
+
+    
+}
+
+
+void vf_delete_block_buffer(void)
+{//remove current block to the chain
+  uint8_t pos,nextpos,prepos;
+  pos=g_userdata_currpos;
+            if(g_userdata.size==1)
+            {//only 1 block
+              g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE]=0x00;
+              g_userdata_firstpos=g_userdata_currpos=g_userdata_lastpos=0;
+              g_userdata.size--;
+            }
+            else
+            {
+              if(pos==g_userdata_firstpos)
+              {//current block is the first block
+                 nextpos=g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+1];                 
+                 g_userdata.p_data[nextpos*MAX_USERDATA_BUFFER_BLOCKSIZE+2]=0x00;
+                 g_userdata_currpos=nextpos;
+              }
+              else if (pos==g_userdata_lastpos)
+              {//current block is the last block
+                prepos=g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+2];
+                 g_userdata.p_data[prepos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]=0x00;
+                g_userdata_currpos=g_userdata_firstpos;
+              }
+              else{
+                 nextpos=g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+1];
+                 prepos=g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+2];
+                 g_userdata.p_data[nextpos*MAX_USERDATA_BUFFER_BLOCKSIZE+2]=prepos;
+                 g_userdata.p_data[prepos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]=nextpos;
+                 g_userdata_currpos=nextpos;
+              }
+              g_userdata.size--;
+            }
+}
+
+
+/*---------------------
+@Brief: advertising a packet in buffer by pasting it to user data field of adv struct
+g_userdata_currpos: packet to be sent
+g_userdata_firstpos: first packet block in buffer
+g_userdata_lastpos: last packet block in buffer
+g_userdata.size: number of used block in buffer
+*/
+
+void relay_adv_data2(void)
+{
+
+    ret_code_t err_code;
+    uint8_t i;
+
+    uint8_t advlen=org_adv_data_size;
+    static uint8_t relay_data[32];
+     uint16_t pos=g_userdata_firstpos;
+    uint8_t relay_size;
+
+    while(g_userdata.size>0) //check nubmer of used block
+    {
+          pos=g_userdata_currpos;
+          if(g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+4]==0)
+          {//size of data =0 ->delete block
+            vf_delete_block_buffer();
+          }
+          else if(g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+4+4]>=4) //max TTL=4
+          {//TTL expired ->delete block
+            vf_delete_block_buffer();
+          }
+          else
+          {
+            if(g_userdata_currpos==g_userdata_lastpos) //reach lastpos -> first pos 
+                g_userdata_currpos=g_userdata_firstpos;
+            else
+              g_userdata_currpos=g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+1];
+
+            relay_size= g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+4];
+            g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+4+4]++; //increase TTL
+
+            relay_data[0]=relay_size;
+            relay_data[1]=0xff; //type: MANUFACTURER  
+            memcpy(&relay_data[2],&g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+5],relay_size);
+            memcpy(&adv_packet.adv_data.p_data[advlen],relay_data,relay_size+1);
+            adv_packet.adv_data.len=org_adv_data_size+relay_size+1;
+
+             uart_printf("send %",adv_packet.adv_data.len,pos );
+             for(int i=0;i<adv_packet.adv_data.len;i++)
+              {
+                uart_printf("%d  ",adv_packet.adv_data.p_data[i] );
+              }
+              uart_printf("\n\r"); 
+            break;
+          }
+
+    }//while
+   
+}
+
+
+
+
+/*
+@brief: modify relay data by increasing TTL, byte[3] of input
+*/
+static void vf_modify_relay_data(uint8_array_t *checkdata)
+{
+  checkdata->p_data[3]++;
+}
+
+/*
+@brief: validate relay data, looking up in the buffer to find an element match with new data:
+1. source addr (byte 0), destination addr(byte 1), packet id(byte2) 
+2. if (1.) match, check time to live (byte 3) and update the new to old if the new is higher
+ 
+3.  if (1.) not match, return 0xFFFF -> new packet
+*/
+static uint16_t vf_validate_relay_packet(uint8_array_t *checkdata)
+{
+
+  uint8_t src_id=0;
+  uint8_array_t userdata;
+  uint8_t cmpdata[4];
+  uint8_t i,size;
+  size_t temp_pos=g_userdata_firstpos;
+  size_t pos=g_userdata_firstpos;
+  while(pos!=g_userdata_lastpos)
+  {
+      temp_pos=pos+1;
+      for(i=0;i<4;i++)
+      {
+        if(temp_pos>=MAX_USERDATA_BUFFER)
+        {
+          temp_pos=0;
+        }
+        cmpdata[i]=garr_userdata[temp_pos++];
+      }
+      if(memcmp(checkdata->p_data,cmpdata,3)==0)
+      {//matched
+        if(checkdata->p_data[3]>cmpdata[3])
+        {//update TTL if new is higher than old
+          garr_userdata[temp_pos-1]=checkdata->p_data[3];
+        }
+
+        return pos;
+      }
+      else
+      {//unmatched, check next packet in buffer
+
+        size=g_userdata.p_data[pos];
+        if(size+pos<=MAX_USERDATA_BUFFER)
+        {
+          pos+=size;
+        }
+        else
+        {
+          pos=0+size-(MAX_USERDATA_BUFFER-pos);
+        }
+      }
+  }
+  return 0xFFFF;
+}
+
+
+/*
+@brief: validate relay data, looking up in the buffer to find an element match with new data:
+1. source addr (byte 0), destination addr(byte 1), packet id(byte2) 
+2. if (1.) match, check time to live (byte 3) and update the new to old if the new is higher
+ return the position of match item
+3.  if (1.) not match, return 0xFFFF -> new packet
+*/
+static uint16_t vf_validate_relay_packet2(uint8_array_t *checkdata)
+{
+
+  uint8_t src_id=0;
+  uint8_array_t userdata;
+  uint8_t cmpdata[4];
+  uint8_t i,size;
+  size_t temp_pos=g_userdata_firstpos;
+  size_t pos=g_userdata_firstpos;
+
+  if(g_userdata.size==0)
+    return 0xFFFF;
+  else if(g_userdata.size==1)
+  {
+      temp_pos=pos*MAX_USERDATA_BUFFER_BLOCKSIZE+5;    
+      for(i=0;i<4;i++)
+      {
+        cmpdata[i]=g_userdata.p_data[temp_pos++];
+      }
+      if(memcmp(checkdata->p_data,cmpdata,3)==0)
+      {
+     /*check TTL
+        if(checkdata->p_data[3]>cmpdata[3])
+        {//update TTL if new is higher than old
+          g_userdata.p_data[temp_pos-1]=checkdata->p_data[3];
+        }*/
+
+        return pos;
+      }
+      else
+      {
+        return 0xFFFF;
+      }
+
+  }
+  else
+  {
+    while(pos!=g_userdata_lastpos)
+   {
+      temp_pos=pos*MAX_USERDATA_BUFFER_BLOCKSIZE+5;    
+      for(i=0;i<4;i++)
+      {
+        cmpdata[i]=g_userdata.p_data[temp_pos++];
+      }
+      if(memcmp(checkdata->p_data,cmpdata,3)==0)
+      {
+      /*check TTL
+        if(checkdata->p_data[3]>cmpdata[3])
+        {//update TTL if new is higher than old
+          g_userdata.p_data[temp_pos-1]=checkdata->p_data[3];
+        }*/
+
+        return pos;
+      }
+      else
+      {//unmatched, check next packet in buffer
+        pos=g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+1];
+      }
+    }
+  }
+  return 0xFFFF;
+}
+
+/*--------------------
+@brief: modify input data to preparing send back to the source
+*/
+void vf_process_adv_command(uint8_array_t *data)
+{//reply to source
+  uint8_t pos=0;
+  uint8_t buff[32];
+  memcpy(buff,data->p_data,data->size);
+
+    buff[0]=CLUSTER_ID; //source
+    buff[1]=data->p_data[0]; //destination; //destination
+    buff[2]=data->p_data[2]+1; //Packet_no
+    buff[3]=0x0; //TTL
+    buff[4+CLUSTER_ID%2]+=CLUSTER_ID; 
+    buff[6+CLUSTER_ID%2]+=CLUSTER_ID; 
+    buff[8+CLUSTER_ID%2]+=CLUSTER_ID;
+    buff[10+CLUSTER_ID%2]+=CLUSTER_ID;
+    buff[12+CLUSTER_ID%2]+=CLUSTER_ID;
+    buff[14+CLUSTER_ID%2]+=CLUSTER_ID;
+    buff[16+CLUSTER_ID%2]+=CLUSTER_ID;
+
+  memcpy(data->p_data,buff,data->size);
+
+}
+
+/*------------
+start advertising dummy data using buffer
+---------*/
+static void vf_start_broadcast_data(void)
+{
+
+
+    uint8_t buff[32];
+    uint8_t i;
+    uint8_array_t buffdata;
+    ret_code_t err_code;
+    uart_printf("add start broadcast data\n\r");
+    err_code=sd_ble_gap_adv_stop(m_adv_handle);
+    uart_printf("$r1 %d ",err_code);
+ /*
+   static bool k1=false;   
+    if(k1==true)
+      err_code=sd_ble_gap_adv_stop(m_adv_handle);
+    else
+      err_code=sd_ble_gap_adv_stop(m_adv_handle);
+
+    uart_printf("$r1 %d ",err_code);
+  nrf_delay_ms(500);
+*/
+
+
+
+    buff[0]=19; //length
+    buff[1]=0xff; //type
+    buff[2]=CLUSTER_ID; //source
+    buff[3]=CLUSTER_ID%2+1; //destination
+    buff[4]=0x3; //Packet_no
+    buff[5]=0x0; //TTL
+    buff[6]=0x1; 
+    buff[7]=0x2;
+    buff[8]=0x3;
+    buff[9]=0x4;   
+    buff[10]=5;             
+   buff[11]=6;
+  buff[12]=7;
+  buff[13]=8;
+  buff[14]=9;
+  buff[15]=10;
+  buff[16]=11;
+  buff[17]=12;
+  buff[18]=13;
+  buff[19]=14;
+  buffdata.p_data=&buff[2];
+  buffdata.size=18;
+  vf_add_packet_to_buffer2(&buffdata);
+  //memcpy(&adv_packet.adv_data.p_data[org_adv_data_size],buff,20);
+
+
+  err_code = sd_ble_gap_adv_start(m_adv_handle, APP_BLE_CONN_CFG_TAG);
+    //APP_ERROR_CHECK(err_code);
+  uart_printf("$r3 %d ",err_code);
+}
+
+
+/*------------
+start advertising dummy data directly
+---------*/
+static void vf_start_broadcast_data2(void)
+{
+
+    uint8_t buff[32];
+    uint8_t i;
+    uint8_array_t buffdata;
+    ret_code_t err_code;
+    uart_printf("add start broadcast data\n\r");
+    err_code=sd_ble_gap_adv_stop(m_adv_handle); //stop advertising
+    uart_printf("$err1 %d ",err_code); 
+ /*
+   static bool k1=false;   
+    if(k1==true)
+      err_code=sd_ble_gap_adv_stop(m_adv_handle);
+    else
+      err_code=sd_ble_gap_adv_stop(m_adv_handle);
+
+    uart_printf("$r1 %d ",err_code);
+  nrf_delay_ms(500);
+*/
+
+
+
+    buff[0]=19; //length
+    buff[1]=0xff; //type
+    buff[2]=CLUSTER_ID; //source
+    buff[3]=CLUSTER_ID%2+1; //destination
+    buff[4]=0x3; //Packet_no
+    buff[5]=0x0; //TTL
+    buff[6]=0x1; 
+    buff[7]=0x2;
+    buff[8]=0x3;
+    buff[9]=0x4;   
+    buff[10]=5;             
+   buff[11]=6;
+  buff[12]=7;
+  buff[13]=8;
+  buff[14]=9;
+  buff[15]=10;
+  buff[16]=11;
+  buff[17]=12;
+  buff[18]=13;
+  buff[19]=14;
+  buffdata.p_data=&buff[0];
+  buffdata.size=18;
+  //vf_add_packet_to_buffer2(&buffdata);
+  memcpy(&adv_packet.adv_data.p_data[org_adv_data_size],buff,20);
+
+
+  err_code = sd_ble_gap_adv_start(m_adv_handle, APP_BLE_CONN_CFG_TAG); //start advertising
+    //APP_ERROR_CHECK(err_code);
+  uart_printf("$err2 %d ",err_code);
+}
+
+
+static void vf_stop_broadcast_data(void)
+{
+
+    uint8_t buff[32];
+    uint8_t i;
+    ret_code_t err_code;
+    uart_printf(" stop broadcast userdata \n\r");
+
+    err_code=sd_ble_gap_adv_stop(m_adv_handle);
+    uart_printf("$r1 %d ",err_code);
+
+    memset(buff,0,32);
+    memcpy(&adv_packet.adv_data.p_data[org_adv_data_size],buff,20);   
+
+       err_code = sd_ble_gap_adv_start(m_adv_handle, APP_BLE_CONN_CFG_TAG);
+    //APP_ERROR_CHECK(err_code);
+    uart_printf("$r3 %d ",err_code);
+}
+
 
 /**@brief Function for setting up advertising data. */
 static void advertising_data_set(void)
@@ -1010,17 +1791,54 @@ static void advertising_data_set(void)
 
     sr_data.uuids_complete.uuid_cnt = sizeof(m_adv_uuids) / sizeof(m_adv_uuids[0]);
     sr_data.uuids_complete.p_uuids = m_adv_uuids;
-    
-    adv_packet.adv_data.p_data = adv_data_buf;
+ 
+ 
+    adv_packet.adv_data.p_data = &adv_data_buf[0];
     adv_packet.adv_data.len = ADV_MAX_LENGTH;
     adv_packet.scan_rsp_data.p_data = sr_data_buf;
     adv_packet.scan_rsp_data.len = ADV_MAX_LENGTH;
+
     
+
+
     err_code = ble_advdata_encode(&adv_data, adv_packet.adv_data.p_data, &adv_packet.adv_data.len);
     APP_ERROR_CHECK(err_code);
     
     err_code = ble_advdata_encode(&sr_data, adv_packet.scan_rsp_data.p_data, &adv_packet.scan_rsp_data.len);
     APP_ERROR_CHECK(err_code);
+
+   //vinh
+    org_adv_data_size=adv_packet.adv_data.len;
+    uart_printf("%d  ",adv_packet.adv_data.len );
+    
+
+    //student: initial advertising data
+    org_adv_data_size=adv_packet.adv_data.len;  //mark the start position of datafield 
+
+    adv_packet.adv_data.p_data[org_adv_data_size+0]=19; //length
+    adv_packet.adv_data.p_data[org_adv_data_size+1]=0xff; //type
+    adv_packet.adv_data.p_data[org_adv_data_size+2]=CLUSTER_ID; //source
+    adv_packet.adv_data.p_data[org_adv_data_size+3]=CLUSTER_ID%2+1; //destination
+    adv_packet.adv_data.p_data[org_adv_data_size+4]=0x3; //Packet_no
+    adv_packet.adv_data.p_data[org_adv_data_size+5]=0x0; //TTL
+    adv_packet.adv_data.p_data[org_adv_data_size+6]=0x1; //data 1
+    adv_packet.adv_data.p_data[org_adv_data_size+7]=0x1; //data 2
+    adv_packet.adv_data.p_data[org_adv_data_size+8]=0x1; //data 3
+    adv_packet.adv_data.p_data[org_adv_data_size+9]=0x1; //data 4
+    adv_packet.adv_data.p_data[org_adv_data_size+10]=0x1; //data 5
+    adv_packet.adv_data.p_data[org_adv_data_size+11]=0x1; //data 6
+    adv_packet.adv_data.p_data[org_adv_data_size+12]=0x1; //data 7
+    adv_packet.adv_data.p_data[org_adv_data_size+13]=0x1; //data 8
+    adv_packet.adv_data.p_data[org_adv_data_size+14]=0x1; //data 9
+    adv_packet.adv_data.p_data[org_adv_data_size+15]=0x1; //data 10
+    adv_packet.adv_data.p_data[org_adv_data_size+16]=0x1; //data 11
+    adv_packet.adv_data.p_data[org_adv_data_size+17]=0x1; //data 12
+    adv_packet.adv_data.p_data[org_adv_data_size+18]=0x1; //data 13
+    adv_packet.adv_data.p_data[org_adv_data_size+19]=0x1; //data 14
+
+    memset(&adv_packet.adv_data.p_data[org_adv_data_size],0,20);
+    adv_packet.adv_data.len=org_adv_data_size+20; //length
+
     
     //adv_params.properties.connectable = 1;
     //adv_params.properties.scannable = 1;
@@ -1033,8 +1851,12 @@ static void advertising_data_set(void)
     adv_params.primary_phy   = BLE_GAP_PHY_1MBPS;
     adv_params.secondary_phy = BLE_GAP_PHY_1MBPS;
 
+    memcpy((void*)&adv_params2,(void*)&adv_params,sizeof(adv_params));
+
     err_code = sd_ble_gap_adv_set_configure(&m_adv_handle, &adv_packet, &adv_params);
     APP_ERROR_CHECK(err_code);
+    
+ 
 }
 
 
@@ -1189,19 +2011,34 @@ ret_code_t disconnect_all_peripherals()
  * @param[in] pin_no        The pin that the event applies to.
  * @param[in] button_action The button action (press/release).
  */
+
+
 static void button_event_handler(uint8_t pin_no, uint8_t button_action)
 {
     ret_code_t err_code;
-
+    uint8_array_t userdata;
+    static bool k=true;
     switch (pin_no)
     {
         case CENTRAL_DISCONNECT_BUTTON:
+
+/*
             if(m_per_con_handle != BLE_CONN_HANDLE_INVALID)
             {
                 sd_ble_gap_disconnect(m_per_con_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
             }
             break;
-        
+  */
+        //vinh
+        if(k==true)
+        {
+                    vf_stop_broadcast_data();
+            k=false;
+        }
+        else
+          k=true;
+                    break;
+
         case SCAN_START_STOP_BUTTON:
             if(button_action == APP_BUTTON_PUSH)
             {
@@ -1223,8 +2060,20 @@ static void button_event_handler(uint8_t pin_no, uint8_t button_action)
             {
                 NRF_LOG_INFO("LBS write LED state %d", button_action);
             }
-            break;
+            //vinh
+          if(k==true)
+          {
+          vf_start_broadcast_data();
+          k=false;
+          }
+          else
+           k=true;
 
+        //vinh
+        case TEST_BUTTON:
+         
+
+          break;
         default:
             APP_ERROR_HANDLER(pin_no);
             break;
@@ -1374,7 +2223,7 @@ static void log_init(void)
     ret_code_t err_code = NRF_LOG_INIT(NULL);
     APP_ERROR_CHECK(err_code);
 
-    NRF_LOG_DEFAULT_BACKENDS_INIT();
+    NRF_LOG_DEFAULT_BACKENDS_INIT();    
 }
 
 
@@ -1496,7 +2345,20 @@ static void process_app_commands()
 int main(void)
 {
     uint32_t err_code;
-    
+
+    //vinh
+    //name clusterhead and string to detect blinky group
+    char str1[4],s;
+    sprintf(str1,"%d",CLUSTER_ID);
+ 
+    strcat(m_target_clusterhead_name,(const char*)str1);
+    /*s='A'+CLUSTER_ID-1;
+    m_target_blinky_name[0]=m_target_blinky_name[1]=s;
+    m_target_blinky_name[2]=0;*/
+    g_userdata_currpos=g_userdata_lastpos=g_userdata_firstpos;
+    g_userdata.size=0;  
+    memset(garr_userdata,0,sizeof(garr_userdata));
+
     log_init();
     timer_init();
     uart_init();
@@ -1517,10 +2379,14 @@ int main(void)
     enable_gpio_debug();
 
     NRF_LOG_INFO("Multilink example started");
-    uart_printf("Multilink example started. Group name \"%s\"\r\n", m_target_periph_name);
+    //uart_printf("Multilink example started. Group name \"%s\"\r\n", m_target_periph_name); //vinh, change group name
+    uart_printf("Multilink example started. Device Name \"%s\"\r\n", m_target_clusterhead_name); //vinh, change group name
+    uart_printf("Multilink example started. Thingy Group \"%s\"\r\n", m_target_blinky_name); //vinh, change group name
+
+    
 
     for (int i = 0; i < NRF_SDH_BLE_TOTAL_LINK_COUNT; ++i){
-        m_coded_phy_conn_handle[i] = BLE_CONN_HANDLE_INVALID;
+        m_coded_phy_conn_handle[i] = BLE_CONN_HANDLE_INVALID; //vinh, init the handle
     }
     // Start scanning for peripherals and initiate connection to devices which  advertise.
     scan_start(false);
@@ -1533,9 +2399,9 @@ int main(void)
     
     for (;;)
     {
-        if(m_per_con_handle != BLE_CONN_HANDLE_INVALID)
+        if(m_per_con_handle != BLE_CONN_HANDLE_INVALID) //vinh BLE is ongoing
         {
-            while(app_aggregator_flush_ble_commands());
+            while(app_aggregator_flush_ble_commands()); //flush all command in buffer
         }
 
         process_app_commands();
