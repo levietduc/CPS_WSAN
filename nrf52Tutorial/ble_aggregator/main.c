@@ -83,10 +83,10 @@
 // Peripheral parameters
 
 /*------------
-//student: CLuster head Configuration
+//Student: CLuster head Configuration. Real device name will be: DEVICE_NAME + CLUSTER_ID
 ----------*/
 #define CLUSTER_ID      2
-#define DEVICE_NAME             "CLH"                    /**< Name of device. Will be included in the advertising data. */
+#define DEVICE_NAME             "CLH"                    /**< Name of device. Will be included in the advertising data. -> CLHx*/
 
 //#define DEVICE_NAME                  "NT:1"                       /**< Name of device. Will be included in the advertising data. */
 
@@ -221,7 +221,7 @@ void relay_adv_data(void);
 static uint16_t vf_validate_relay_packet(uint8_array_t *checkdata);
 static uint16_t vf_validate_relay_packet2(uint8_array_t *checkdata);
 /*
-@modify relay data by increasing TTL, byte[2] of input
+@modify relay data by increasing hop-count, byte[2] of input
 */
 static void vf_modify_relay_data(uint8_array_t *checkdata);
 //vinh
@@ -759,7 +759,6 @@ static char str_uart[128];
 static uint16_t str_uart_len=0;
 
 
-
 static void on_adv_report(ble_evt_t const * p_ble_evt)
 {
     uint32_t      err_code;
@@ -876,7 +875,7 @@ static void on_adv_report(ble_evt_t const * p_ble_evt)
                       if((i==0xFFFF)||(i==0xFFFE))
                       {//new packet
                         if(i=0xFFFF){
-                          //vf_modify_relay_data(&userdata); //increase TTL before relay
+                          //vf_modify_relay_data(&userdata); //increase hop-count before relay
                         }
                         //err_code=vf_add_packet_to_buffer(&userdata);
                         err_code=vf_add_packet_to_buffer2(&userdata); //add packet to buffer for advertising
@@ -1448,8 +1447,8 @@ void relay_adv_data2(void)
           {//size of data =0 ->delete block
             vf_delete_block_buffer();
           }
-          else if(g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+4+4]>=4) //max TTL=4
-          {//TTL expired ->delete block
+          else if(g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+4+4]>=4) //max hop-count=4
+          {//Hop-count expired ->delete block
             vf_delete_block_buffer();
           }
           else
@@ -1460,7 +1459,7 @@ void relay_adv_data2(void)
               g_userdata_currpos=g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+1];
 
             relay_size= g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+4];
-            g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+4+4]++; //increase TTL
+            g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+4+4]++; //increase hop-count
 
             relay_data[0]=relay_size;
             relay_data[1]=0xff; //type: MANUFACTURER  
@@ -1485,7 +1484,7 @@ void relay_adv_data2(void)
 
 
 /*
-@brief: modify relay data by increasing TTL, byte[3] of input
+@brief: modify relay data by increasing hop-count, byte[3] of input
 */
 static void vf_modify_relay_data(uint8_array_t *checkdata)
 {
@@ -1522,7 +1521,7 @@ static uint16_t vf_validate_relay_packet(uint8_array_t *checkdata)
       if(memcmp(checkdata->p_data,cmpdata,3)==0)
       {//matched
         if(checkdata->p_data[3]>cmpdata[3])
-        {//update TTL if new is higher than old
+        {//update hop-count if new is higher than old
           garr_userdata[temp_pos-1]=checkdata->p_data[3];
         }
 
@@ -1574,9 +1573,9 @@ static uint16_t vf_validate_relay_packet2(uint8_array_t *checkdata)
       }
       if(memcmp(checkdata->p_data,cmpdata,3)==0)
       {
-     /*check TTL
+     /*check hop-count
         if(checkdata->p_data[3]>cmpdata[3])
-        {//update TTL if new is higher than old
+        {//update hop-count if new is higher than old
           g_userdata.p_data[temp_pos-1]=checkdata->p_data[3];
         }*/
 
@@ -1599,9 +1598,9 @@ static uint16_t vf_validate_relay_packet2(uint8_array_t *checkdata)
       }
       if(memcmp(checkdata->p_data,cmpdata,3)==0)
       {
-      /*check TTL
+      /*check hop-count
         if(checkdata->p_data[3]>cmpdata[3])
-        {//update TTL if new is higher than old
+        {//update hop-count if new is higher than old
           g_userdata.p_data[temp_pos-1]=checkdata->p_data[3];
         }*/
 
@@ -1628,7 +1627,7 @@ void vf_process_adv_command(uint8_array_t *data)
     buff[0]=CLUSTER_ID; //source
     buff[1]=data->p_data[0]; //destination; //destination
     buff[2]=data->p_data[2]+1; //Packet_no
-    buff[3]=0x0; //TTL
+    buff[3]=0x0; //hop-count
     buff[4+CLUSTER_ID%2]+=CLUSTER_ID; 
     buff[6+CLUSTER_ID%2]+=CLUSTER_ID; 
     buff[8+CLUSTER_ID%2]+=CLUSTER_ID;
@@ -1673,7 +1672,7 @@ static void vf_start_broadcast_data(void)
     buff[2]=CLUSTER_ID; //source
     buff[3]=CLUSTER_ID%2+1; //destination
     buff[4]=0x3; //Packet_no
-    buff[5]=0x0; //TTL
+    buff[5]=0x0; //hop-count
     buff[6]=0x1; 
     buff[7]=0x2;
     buff[8]=0x3;
@@ -1731,7 +1730,7 @@ static void vf_start_broadcast_data2(void)
     buff[2]=CLUSTER_ID; //source
     buff[3]=CLUSTER_ID%2+1; //destination
     buff[4]=0x3; //Packet_no
-    buff[5]=0x0; //TTL
+    buff[5]=0x0; //hop-count
     buff[6]=0x1; 
     buff[7]=0x2;
     buff[8]=0x3;
@@ -1820,7 +1819,7 @@ static void advertising_data_set(void)
     adv_packet.adv_data.p_data[org_adv_data_size+2]=CLUSTER_ID; //source
     adv_packet.adv_data.p_data[org_adv_data_size+3]=CLUSTER_ID%2+1; //destination
     adv_packet.adv_data.p_data[org_adv_data_size+4]=0x3; //Packet_no
-    adv_packet.adv_data.p_data[org_adv_data_size+5]=0x0; //TTL
+    adv_packet.adv_data.p_data[org_adv_data_size+5]=0x0; //hop-count
     adv_packet.adv_data.p_data[org_adv_data_size+6]=0x1; //data 1
     adv_packet.adv_data.p_data[org_adv_data_size+7]=0x1; //data 2
     adv_packet.adv_data.p_data[org_adv_data_size+8]=0x1; //data 3
