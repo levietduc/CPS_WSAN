@@ -86,7 +86,7 @@
 //student: CLuster head Configuration
 ----------*/
 #define CLUSTER_ID     2
-#define DEVICE_NAME             "CLH"                    /**< Name of device. Will be included in the advertising data. */
+#define DEVICE_NAME             "CH"                    /**< Name of device. Will be included in the advertising data. */
 #define SINK_ID         10       
 
 //vinh change
@@ -599,7 +599,7 @@ static void thingy_uis_c_evt_handler(ble_thingy_uis_c_t * p_thingy_uis_c, ble_th
             err_code = ble_thingy_uis_c_button_notif_enable(p_thingy_uis_c);
             APP_ERROR_CHECK(err_code);
 
-            //vinh ver2
+            //version_2
             //err_code = ble_thingy_uis_c_enviroment_notif_enable(p_thingy_uis_c);
             //APP_ERROR_CHECK(err_code);                        
             err_code = ble_thingy_sensor_c_pressure_notif_enable(p_thingy_uis_c);
@@ -904,7 +904,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
                         
                         err_code = ble_thingy_uis_c_handles_assign(&m_thingy_uis_c[p_gap_evt->conn_handle],
                                                                    p_gap_evt->conn_handle, NULL);
-                        //vinh ver2
+                        //version2
                         if(g_is_sink==false)
                         {//advertise this new node to sink
                           vf_adv_thingy_data(p_gap_evt->conn_handle,AGG_NODE_LINK_CONNECTED);
@@ -1483,7 +1483,7 @@ static uint16_t vf_validate_relay_packet(uint8_array_t *checkdata)
       if(memcmp(checkdata->p_data,cmpdata,3)==0)
       {//matched
         if(checkdata->p_data[3]>cmpdata[3])
-        {//update TTL if new is higher than old
+        {//update hop count if new is higher than old
           garr_userdata[temp_pos-1]=checkdata->p_data[3];
         }
 
