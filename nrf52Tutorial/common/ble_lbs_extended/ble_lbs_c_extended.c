@@ -169,6 +169,9 @@ static void on_hvx(ble_lbs_c_t * p_ble_lbs_c, ble_evt_t const * p_ble_evt)
             p_ble_lbs_c->evt_handler(p_ble_lbs_c, &ble_lbs_c_evt);
         }
     }
+
+    //version2
+
 }
 
 
