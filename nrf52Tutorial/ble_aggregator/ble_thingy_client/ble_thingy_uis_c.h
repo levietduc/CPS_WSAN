@@ -79,6 +79,19 @@ NRF_SDH_BLE_OBSERVERS(_name ## _obs,                                            
 #define THINGY_UIS_UUID_BUTTON_CHAR 0x0302
 #define THINGY_UIS_UUID_LED_CHAR    0x0301
 
+#define THINGY_SENSOR_UUID_SERVICE     0x0200
+#define THINGY_SENSOR_UUID_TEMPERATURE_CHAR 0x0201
+#define THINGY_SENSOR_UUID_PRESSURE_CHAR    0x0202
+#define THINGY_SENSOR_UUID_HUMIDITY_CHAR    0x0203
+#define THINGY_SENSOR_UUID_GAS_CHAR    0x0204
+#define THINGY_SENSOR_UUID_COLOR_CHAR    0x0205
+#define THINGY_SENSOR_UUID_CONFIG_CHAR    0x0206
+
+//vinh doing
+#define THINGY_UIS_UUID_TEMPERATURE 0x0201
+#define THINGY_UIS_UUID_PRESSURE 0x0202
+#define THINGY_UIS_UUID_HUMIDITY 0x0203
+
 /**@brief THINGY_UIS Client event type. */
 typedef enum
 {
@@ -136,11 +149,26 @@ typedef struct
     uint16_t button_cccd_handle;  /**< Handle of the CCCD of the Button characteristic. */
     uint16_t button_handle;       /**< Handle of the Button characteristic as provided by the SoftDevice. */
     uint16_t led_handle;          /**< Handle of the LED characteristic as provided by the SoftDevice. */
+
+//vinh ver2
+    uint16_t pressure_cccd_handle;  /**< Handle of the CCCD of the Pressure characteristic. */
+    uint16_t pressure_handle;       /**< Handle of the Button characteristic as provided by the SoftDevice. */
+    uint16_t temperature_cccd_handle;       
+    uint16_t temperature_handle;       
+    uint16_t humidity_cccd_handle;     
+    uint16_t humidity_handle;       
+    uint16_t gas_cccd_handle;     
+    uint16_t gas_handle; 
+    uint16_t color_cccd_handle;     
+    uint16_t color_handle; 
+
 } thingy_uis_db_t;
 
 /**@brief LED Button Event structure. */
 typedef struct
 {
+
+//vinh doing
     ble_thingy_uis_c_evt_type_t evt_type;    /**< Type of the event. */
     uint16_t             conn_handle; /**< Connection handle on which the event occured.*/
     union
@@ -168,6 +196,13 @@ struct ble_thingy_uis_c_s
     ble_thingy_uis_c_evt_handler_t evt_handler;  /**< Application event handler to be called when there is an event related to the LED Button service. */
     uint8_t                 uuid_type;    /**< UUID type. */
     uint8_t                 colors[3];
+
+    //vinh ver2
+    uint8_t                 temperature[2];
+    uint8_t                 pressure[2];
+    uint8_t                 humidity[2];
+    uint8_t                 gas[2];
+   
 };
 
 /**@brief LED Button Client initialization structure. */
@@ -263,6 +298,9 @@ uint32_t ble_thingy_uis_led_set_constant(ble_thingy_uis_c_t * p_ble_thingy_uis_c
 uint32_t ble_thingy_uis_led_set_breathe(ble_thingy_uis_c_t * p_ble_thingy_uis_c, uint8_t color, uint8_t intensity, uint16_t delay);
 
 uint32_t ble_thingy_uis_led_set_one_shot(ble_thingy_uis_c_t * p_ble_thingy_uis_c, uint8_t color, uint8_t intensity);
+
+//vinh ver 2
+uint32_t ble_thingy_sensor_c_pressure_notif_enable(ble_thingy_uis_c_t * p_ble_thingy_uis_c);
 
 #ifdef __cplusplus
 }
