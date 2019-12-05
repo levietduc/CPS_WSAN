@@ -12,6 +12,10 @@
 
 enum {APP_AGGR_COL_IND_RED, APP_AGGR_COL_IND_GREEN, APP_AGGR_COL_IND_BLUE};
 
+//vinh
+enum TX_COMMANDS {AGG_BLE_LINK_CONNECTED = 1, AGG_BLE_LINK_DISCONNECTED, AGG_BLE_LINK_DATA_UPDATE, AGG_BLE_LED_BUTTON_PRESSED,\
+                AGG_NODE_LINK_CONNECTED, AGG_NODE_LINK_DISCONNECTED, AGG_NODE_LINK_DATA_UPDATE, AGG_NODE_LED_BUTTON_PRESSED};
+
 typedef struct
 {
     uint16_t conn_handle;
@@ -58,5 +62,8 @@ void device_list_print(void);
 void app_aggregator_all_led_update(uint8_t button_state);
 
 void uart_printf(const char *fmt, ...);
+
+//vinh
+void vf_app_adv_data_send_to_phone(uint8_array_t *data);
 
 #endif
