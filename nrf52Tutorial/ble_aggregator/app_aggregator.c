@@ -1,12 +1,17 @@
 #include "app_aggregator.h"
 #include "nrf_log.h"
 #include <string.h>
+#include <stdio.h>
 
 #define BLE_AGG_CMD_BUFFER_SIZE 2048
 #define BLE_AGG_CMD_MAX_LENGTH  64
 
 enum {APP_AGG_ERROR_CONN_HANDLE_CONFLICT = 1, APP_AGG_ERROR_LINK_INFO_LIST_FULL, APP_AGG_ERROR_CONN_HANDLE_NOT_FOUND};
-enum TX_COMMANDS {AGG_BLE_LINK_CONNECTED = 1, AGG_BLE_LINK_DISCONNECTED, AGG_BLE_LINK_DATA_UPDATE, AGG_BLE_LED_BUTTON_PRESSED};
+
+//vinh ver2
+//enum TX_COMMANDS {AGG_BLE_LINK_CONNECTED = 1, AGG_BLE_LINK_DISCONNECTED, AGG_BLE_LINK_DATA_UPDATE, AGG_BLE_LED_BUTTON_PRESSED};
+//enum TX_COMMANDS {AGG_BLE_LINK_CONNECTED = 1, AGG_BLE_LINK_DISCONNECTED, AGG_BLE_LINK_DATA_UPDATE, AGG_BLE_LED_BUTTON_PRESSED,\
+               // AGG_NODE_LINK_CONNECTED, AGG_NODE_LINK_DISCONNECTED, AGG_NODE_LINK_DATA_UPDATE, AGG_NODE_LED_BUTTON_PRESSED};
 enum {APP_AGG_DEVICE_TYPE_UNKNOWN, APP_AGG_DEVICE_TYPE_BLINKY, APP_AGG_DEVICE_TYPE_THINGY, APP_AGG_DEVICE_TYPE_END};
 //static char *device_type_string_list[] = {"Unknown", "Blinky", "Thingy"};
 static char    *m_phy_name_string_list[] = {"NONE", "1Mbps", "2Mbps", "INVALID", "Coded"};
@@ -28,7 +33,7 @@ static uint16_t device_list_search(uint16_t conn_handle);
 static uint16_t device_list_find_available(void);
 static void device_connected(uint16_t conn_handle, connected_device_info_t *con_dev_info);
 static void device_disconnected(uint16_t conn_handle);
-
+static bool cmd_buffer_put(uint8_t *data, uint16_t length);
 /*static bool cmd_buffer_put(uint8_t *data, uint16_t length)
 {
     if(length > BLE_AGG_CMD_MAX_LENGTH) return false;
@@ -65,6 +70,16 @@ static void device_disconnected(uint16_t conn_handle);
     //NRF_LOG_INFO("BPUT: In: %i, Out: %i\r\n", ble_cmd_buf_in_ptr, ble_cmd_buf_out_ptr);
     return true;
 }*/
+
+//vinh
+//put data into buffer to send to phone 
+// in "cmd buffer" @ref ble_cmd_buf[ble_cmd_buf_in_ptr]
+// length: ble_cmd_buf[ble_cmd_buf_in_ptr+0]
+//data from: ble_cmd_buf[ble_cmd_buf_in_ptr+1 -> length]
+//update  new ble_cmd_buf_in_ptr= current ble_cmd_buf_in_ptr +64
+//start at addr 0x64, max at 2048-64
+
+
 
 static bool cmd_buffer_put(uint8_t *data, uint16_t length)
 {
@@ -137,7 +152,7 @@ static void cmd_buffer_flush()
 }*/
 
 void app_aggregator_init(ble_agg_cfg_service_t *agg_cfg_service)
-{
+{//vinh, clear link info list, set default aggr name is "Name    "
     m_ble_service = agg_cfg_service;
     for(int i = 0; i < MAX_NUMBER_OF_LINKS; i++)
     {
@@ -151,6 +166,9 @@ void app_aggregator_init(ble_agg_cfg_service_t *agg_cfg_service)
     m_device_name_header_string[MAX_ADV_NAME_LENGTH] = 0;
 }
 
+
+//vinh, to be refered in "ble_evt_handler", in BLE_GAP_EVT_CONNECTED
+// when having a new connection, update list and send it to central device
 void app_aggregator_on_central_connect(const ble_gap_evt_t *ble_gap_evt, connected_device_info_t *con_dev_info)
 {
     uint16_t conn_handle = ble_gap_evt->conn_handle;
@@ -190,7 +208,7 @@ void app_aggregator_on_central_disconnect(const ble_gap_evt_t *ble_gap_evt)
     device_disconnected(conn_handle);
        
     // Send info to central device (if connected)
-    tx_command_payload[0] = AGG_BLE_LINK_DISCONNECTED;
+   tx_command_payload[0] = AGG_BLE_LINK_DISCONNECTED;
     tx_command_payload[1] = ble_gap_evt->conn_handle >> 8;
     tx_command_payload[2] = ble_gap_evt->conn_handle & 0xFF;
     tx_command_payload_length = 3;
@@ -213,6 +231,7 @@ void app_aggregator_data_update(uint16_t conn_handle, uint8_t *p_data, uint32_t 
 
 void app_aggregator_data_update_by_index(uint16_t device_index)
 {
+
     tx_command_payload[0] = AGG_BLE_LINK_DATA_UPDATE;
     tx_command_payload[1] = m_link_info_list[device_index].conn_handle >> 8;
     tx_command_payload[2] = m_link_info_list[device_index].conn_handle & 0xFF;
@@ -221,7 +240,8 @@ void app_aggregator_data_update_by_index(uint16_t device_index)
     tx_command_payload[5] = m_link_info_list[device_index].rf_phy;
     tx_command_payload[6] = m_link_info_list[device_index].last_rssi;
     tx_command_payload_length = 7;
-    cmd_buffer_put(tx_command_payload, tx_command_payload_length);    
+    cmd_buffer_put(tx_command_payload, tx_command_payload_length);
+        
 }
 
 void app_aggregator_all_led_update(uint8_t button_state)
@@ -230,6 +250,7 @@ void app_aggregator_all_led_update(uint8_t button_state)
     tx_command_payload[1] = button_state;
     tx_command_payload_length = 2;
     cmd_buffer_put(tx_command_payload, tx_command_payload_length);  
+
 }
 
 void app_aggregator_on_blinky_data(uint16_t conn_handle, uint8_t button_state)
@@ -301,13 +322,13 @@ bool app_aggregator_flush_ble_commands(void)
     uint32_t    err_code;
     if(!reuse_packet)
     {
-        if(cmd_buffer_get(&data_ptr, &length))
-        {
+        if(cmd_buffer_get(&data_ptr, &length))  //vinh, get data from receive buff
+        {//vinh, has new data
             //NRF_LOG_INFO("PCKBUF: \r\n");
             //NRF_LOG_HEXDUMP_INFO(data_ptr, length);
             err_code = ble_agg_cfg_service_string_send(m_ble_service, data_ptr, &length);
             if(err_code != NRF_SUCCESS)
-            {
+            {//if error, quit and return next time, return false for the main go to next step
                 memcpy(tmp_buffer, data_ptr, length);
                 data_ptr = tmp_buffer;
                 reuse_packet = true;
@@ -334,6 +355,7 @@ void app_aggregator_clear_buffer(void)
     cmd_buffer_flush();
 }
 
+//vinh, 2 sec after new connection, send all link status all central by put inf in to tx_buffer
 void app_aggregator_update_link_status(void)
 {
     NRF_LOG_INFO("Clear buffer update link status");
@@ -343,6 +365,7 @@ void app_aggregator_update_link_status(void)
         if(m_link_info_list[i].conn_handle != BLE_CONN_HANDLE_INVALID)
         {
             // Prepare new connection packet for each link in the list
+            //vinh doing
             tx_command_payload[0] = AGG_BLE_LINK_CONNECTED;
             tx_command_payload[1] = m_link_info_list[i].conn_handle >> 8;
             tx_command_payload[2] = m_link_info_list[i].conn_handle & 0xFF;
@@ -354,6 +377,8 @@ void app_aggregator_update_link_status(void)
             tx_command_payload[8] = m_link_info_list[i].led_color[APP_AGGR_COL_IND_BLUE];
             tx_command_payload[9] = m_link_info_list[i].last_rssi;
             tx_command_payload[10] = m_link_info_list[i].rf_phy;
+
+
             if(strlen((char *)m_link_info_list[i].adv_name) <= MAX_ADV_NAME_LENGTH)
             {
                 memcpy(&tx_command_payload[11], m_link_info_list[i].adv_name, strlen((char *)m_link_info_list[i].adv_name));
@@ -386,8 +411,8 @@ static uint16_t device_list_find_available()
 
 static void device_connected(uint16_t conn_handle, connected_device_info_t *con_dev_info)
 {
-    if(device_list_search(conn_handle) == BLE_CONN_HANDLE_INVALID)
-    {
+    if(device_list_search(conn_handle) == BLE_CONN_HANDLE_INVALID) 
+    {//vinh, check this handle not connected before -> add new device and info to list
         uint16_t new_device_index;
         new_device_index = device_list_find_available();
         if(new_device_index != 0xFFFF)
@@ -464,3 +489,85 @@ void device_list_print()
         uart_printf("\r\n");
     }
 }
+
+//vinh ver2
+//forward advertising data received from other nodes to phone 
+
+void vf_app_adv_data_send_to_phone(uint8_array_t *data)
+{
+
+  uint8_t i=0,state;
+  uint16_t thingy_id;
+  
+
+  char str1[10]="Thingy",str2[10];
+
+  thingy_id=data->p_data[0]<<8+ data->p_data[5];
+  sprintf(str2,"0x%x :",thingy_id);
+  strcat(str1,str2);
+  uart_printf(str1); 
+
+
+
+
+  state=data->p_data[4];
+  //tx_command_payload[0] =   AGG_NODE_LINK_CONNECTED;
+
+  tx_command_payload[0] =   data->p_data[4];
+  tx_command_payload[1] = data->p_data[0];//source cluster id
+  tx_command_payload[2] = data->p_data[5];//local id
+
+  switch(state)
+  {
+    case AGG_NODE_LINK_CONNECTED:
+        tx_command_payload[3] = 4; ;//type: 1:blinky 2:direct thingy; 
+                              //3:remoted blinky; 4:remote thingy; 5:routing
+        tx_command_payload[4]=data->p_data[3]; //hopcounts
+        tx_command_payload[5] = data->p_data[6]; //temp1
+        tx_command_payload[6] = data->p_data[7];; //temp2
+        tx_command_payload[7] =  data->p_data[8]; //pressure 1
+        tx_command_payload[8] =  data->p_data[9];; //pressure 2
+        tx_command_payload[9] = data->p_data[10];; //hum 1
+        tx_command_payload[10] =  data->p_data[11];; //hum 2
+        tx_command_payload_length=11;
+        if(strlen(str1) <= MAX_ADV_NAME_LENGTH)
+        {
+            memcpy(&tx_command_payload[11], str1, strlen(str1));
+            tx_command_payload_length = 11 + strlen(str1);
+        }
+        else 
+        {
+            tx_command_payload_length = 11;
+        }
+
+        break;
+
+    case AGG_NODE_LINK_DISCONNECTED:
+        tx_command_payload_length=3;
+        break;
+
+    case AGG_NODE_LINK_DATA_UPDATE:
+        tx_command_payload[3] =  7;//type: 1:blinky 2:direct thingy; 
+                              //3:remoted blinky; 4:remote thingy; 5:routing
+        tx_command_payload[4]=data->p_data[3]; //hopcounts
+        tx_command_payload[5] = data->p_data[6]; //temp1
+        tx_command_payload[6] = data->p_data[7];; //temp2
+        tx_command_payload[7] =  data->p_data[8]; //pressure 1
+        tx_command_payload[8] =  data->p_data[9];; //pressure 2
+        tx_command_payload[9] = data->p_data[10];; //hum 1
+        tx_command_payload[10] =  data->p_data[11];; //hum 2
+        tx_command_payload_length=11;
+        break;
+  }
+
+
+  cmd_buffer_put(tx_command_payload, tx_command_payload_length);
+  for(i=0;i<tx_command_payload_length;i++)
+  {
+    sprintf(str2,"%d ",tx_command_payload[i]);
+    uart_printf(str2);
+  }
+  uart_printf("\r\n");
+  NRF_LOG_HEXDUMP_INFO(tx_command_payload, tx_command_payload_length);
+}
+

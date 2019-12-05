@@ -170,7 +170,7 @@ static void on_hvx(ble_lbs_c_t * p_ble_lbs_c, ble_evt_t const * p_ble_evt)
         }
     }
 
-    //version2
+    //vinh ver2
 
 }
 

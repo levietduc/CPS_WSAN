@@ -193,35 +193,63 @@ static void on_disconnected(ble_thingy_uis_c_t * p_ble_thingy_uis_c, ble_evt_t c
 
 void ble_thingy_uis_on_db_disc_evt(ble_thingy_uis_c_t * p_ble_thingy_uis_c, ble_db_discovery_evt_t const * p_evt)
 {
+     
+
     // Check if the Led Button Service was discovered.
+
+    //vinh ver2
     if (p_evt->evt_type == BLE_DB_DISCOVERY_COMPLETE &&
-        p_evt->params.discovered_db.srv_uuid.uuid == THINGY_UIS_UUID_SERVICE &&
+        ((p_evt->params.discovered_db.srv_uuid.uuid == THINGY_UIS_UUID_SERVICE)||
+         (p_evt->params.discovered_db.srv_uuid.uuid == THINGY_SENSOR_UUID_SERVICE))&&
         p_evt->params.discovered_db.srv_uuid.type == p_ble_thingy_uis_c->uuid_type)
     {
         ble_thingy_uis_c_evt_t evt;
-
         evt.evt_type    = BLE_THINGY_UIS_C_EVT_DISCOVERY_COMPLETE;
         evt.conn_handle = p_evt->conn_handle;
 
-        for (uint32_t i = 0; i < p_evt->params.discovered_db.char_count; i++)
-        {
-            const ble_gatt_db_char_t * p_char = &(p_evt->params.discovered_db.charateristics[i]);
-            switch (p_char->characteristic.uuid.uuid)
+
+            for (uint32_t i = 0; i < p_evt->params.discovered_db.char_count; i++)
             {
-                case THINGY_UIS_UUID_LED_CHAR:
-                    evt.params.peer_db.led_handle = p_char->characteristic.handle_value;
-                    break;
-                case THINGY_UIS_UUID_BUTTON_CHAR:
-                    evt.params.peer_db.button_handle      = p_char->characteristic.handle_value;
-                    evt.params.peer_db.button_cccd_handle = p_char->cccd_handle;
-                    break;
+                const ble_gatt_db_char_t * p_char = &(p_evt->params.discovered_db.charateristics[i]);
+                if(p_evt->params.discovered_db.srv_uuid.uuid == THINGY_UIS_UUID_SERVICE)
+                {
 
-                default:
-                    break;
+                    switch (p_char->characteristic.uuid.uuid)
+                    {
+                        case THINGY_UIS_UUID_LED_CHAR:
+                            evt.params.peer_db.led_handle = p_char->characteristic.handle_value;
+                            break;
+                        case THINGY_UIS_UUID_BUTTON_CHAR:
+                            evt.params.peer_db.button_handle      = p_char->characteristic.handle_value;
+                            evt.params.peer_db.button_cccd_handle = p_char->cccd_handle;
+                            break;
+                      NRF_LOG_DEBUG("Led Button Service discovered at peer.");
+                    }
+                }
+                else
+                {
+                    switch (p_char->characteristic.uuid.uuid)
+                    {
+                        case THINGY_UIS_UUID_TEMPERATURE:
+                            evt.params.peer_db.temperature_handle = p_char->characteristic.handle_value;
+                            evt.params.peer_db.temperature_cccd_handle = p_char->cccd_handle;
+
+                            break;
+                        case THINGY_UIS_UUID_PRESSURE:
+                            evt.params.peer_db.pressure_handle = p_char->characteristic.handle_value;
+                            evt.params.peer_db.pressure_cccd_handle = p_char->cccd_handle;
+
+                            break;
+                        case THINGY_UIS_UUID_HUMIDITY:
+                            evt.params.peer_db.humidity_handle = p_char->characteristic.handle_value;
+                            evt.params.peer_db.humidity_cccd_handle = p_char->cccd_handle;
+
+                            break;
+                        default:
+                            break;
+                    }
+                }
             }
-        }
-
-        NRF_LOG_DEBUG("Led Button Service discovered at peer.");
         //If the instance has been assigned prior to db_discovery, assign the db_handles
         if (p_ble_thingy_uis_c->conn_handle != BLE_CONN_HANDLE_INVALID)
         {
@@ -236,6 +264,8 @@ void ble_thingy_uis_on_db_disc_evt(ble_thingy_uis_c_t * p_ble_thingy_uis_c, ble_
         p_ble_thingy_uis_c->evt_handler(p_ble_thingy_uis_c, &evt);
 
     }
+
+
 }
 
 
@@ -255,6 +285,17 @@ uint32_t ble_thingy_uis_c_init(ble_thingy_uis_c_t * p_ble_thingy_uis_c, ble_thin
     p_ble_thingy_uis_c->conn_handle                    = BLE_CONN_HANDLE_INVALID;
     p_ble_thingy_uis_c->evt_handler                    = p_ble_thingy_uis_c_init->evt_handler;
 
+
+ //vinh ver2
+//init service for temperature, pressure, humidity
+    p_ble_thingy_uis_c->peer_thingy_uis_db.temperature_cccd_handle = BLE_GATT_HANDLE_INVALID;
+    p_ble_thingy_uis_c->peer_thingy_uis_db.temperature_handle      = BLE_GATT_HANDLE_INVALID;
+    p_ble_thingy_uis_c->peer_thingy_uis_db.pressure_cccd_handle = BLE_GATT_HANDLE_INVALID;
+    p_ble_thingy_uis_c->peer_thingy_uis_db.pressure_handle      = BLE_GATT_HANDLE_INVALID;
+    p_ble_thingy_uis_c->peer_thingy_uis_db.humidity_cccd_handle = BLE_GATT_HANDLE_INVALID;
+    p_ble_thingy_uis_c->peer_thingy_uis_db.humidity_handle      = BLE_GATT_HANDLE_INVALID;
+
+
     err_code = sd_ble_uuid_vs_add(&thingy_uis_base_uuid, &p_ble_thingy_uis_c->uuid_type);
     if (err_code != NRF_SUCCESS)
     {
@@ -264,10 +305,17 @@ uint32_t ble_thingy_uis_c_init(ble_thingy_uis_c_t * p_ble_thingy_uis_c, ble_thin
 
     thingy_uis_uuid.type = p_ble_thingy_uis_c->uuid_type;
     thingy_uis_uuid.uuid = THINGY_UIS_UUID_SERVICE;
+    ble_db_discovery_evt_register(&thingy_uis_uuid);
 
+ //vinh ver2
+//init service for temperature, pressure, humidity
+    thingy_uis_uuid.uuid = THINGY_SENSOR_UUID_SERVICE;
     return ble_db_discovery_evt_register(&thingy_uis_uuid);
 }
 
+
+
+//vinh doing
 void ble_thingy_uis_c_on_ble_evt(ble_evt_t const * p_ble_evt, void * p_context)
 {
     if ((p_context == NULL) || (p_ble_evt == NULL))
@@ -342,6 +390,21 @@ uint32_t ble_thingy_uis_c_button_notif_enable(ble_thingy_uis_c_t * p_ble_thingy_
 
     return cccd_configure(p_ble_thingy_uis_c->conn_handle,
                           p_ble_thingy_uis_c->peer_thingy_uis_db.button_cccd_handle,
+                          true);
+}
+
+//vinh ver2
+uint32_t ble_thingy_sensor_c_pressure_notif_enable(ble_thingy_uis_c_t * p_ble_thingy_uis_c)
+{
+    VERIFY_PARAM_NOT_NULL(p_ble_thingy_uis_c);
+
+    if (p_ble_thingy_uis_c->conn_handle == BLE_CONN_HANDLE_INVALID)
+    {
+        return NRF_ERROR_INVALID_STATE;
+    }
+
+    return cccd_configure(p_ble_thingy_uis_c->conn_handle,
+                          p_ble_thingy_uis_c->peer_thingy_uis_db.pressure_cccd_handle,
                           true);
 }
 
