@@ -85,8 +85,8 @@
 /*------------
 //student: CLuster head Configuration
 ----------*/
-#define CLUSTER_ID     1
-#define DEVICE_NAME             "CLH"                    /**< Name of device. Will be included in the advertising data. */
+#define CLUSTER_ID     10
+#define DEVICE_NAME             "DCH"                    /**< Name of device. Will be included in the advertising data. */
 #define SINK_ID         10       
 
 //vinh
@@ -112,7 +112,7 @@ static char const m_target_blinky_name[] = "Thingy";
 #define MAX_CONN_PARAMS_UPDATE_COUNT    3    
 
 #define PERIPHERAL_ADV_INTERVAL                100                      /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
-#define PERIPHERAL_ADV_TIMEOUT_IN_SECONDS      0                        /**< The advertising timeout (in units of seconds). */
+#define PERIPHERAL_ADV_TIMEOUT_IN_SECONDS      10                        /**< The advertising timeout (in units of seconds). */
 
 #define PERIPHERAL_ADV_CON_LED      BSP_BOARD_LED_0
 #define CENTRAL_SCANNING_LED        BSP_BOARD_LED_1
@@ -139,11 +139,11 @@ static char const m_target_blinky_name[] = "Thingy";
 
 #define THINGY_RSSI_CONNECT_LIMIT   -50
 //vinh 
-#define CLUSTERHEAD_RSSI_CONNECT_LIMIT   -55
+#define CLUSTERHEAD_RSSI_CONNECT_LIMIT   -80
 #ifdef NRF52840_XXAA
 #define APP_DEFAULT_TX_POWER        8
 #else
-#define APP_DEFAULT_TX_POWER        -40
+#define APP_DEFAULT_TX_POWER        4
 #endif
 
 #define MAX_USERDATA_BUFFER_BLOCK 16
