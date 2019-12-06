@@ -85,11 +85,11 @@
 /*------------
 //student: CLuster head Configuration
 ----------*/
-#define CLUSTER_ID     2
-#define DEVICE_NAME             "CH"                    /**< Name of device. Will be included in the advertising data. */
+#define CLUSTER_ID     1
+#define DEVICE_NAME             "CLH"                    /**< Name of device. Will be included in the advertising data. */
 #define SINK_ID         10       
 
-//vinh change
+//vinh
 static char const m_target_periph_name[] = "NT:";                       /**< Name of the device we try to connect to. This name is searched for in the scan report data*/
 
 //static char const m_target_periph_name[] = "Aggregator";
@@ -111,7 +111,6 @@ static char const m_target_blinky_name[] = "Thingy";
 #define NEXT_CONN_PARAMS_UPDATE_DELAY   APP_TIMER_TICKS(30000)                      /**< Time between each call to sd_ble_gap_conn_param_update after the first call (30 seconds). */
 #define MAX_CONN_PARAMS_UPDATE_COUNT    3    
 
-// Duc: to control the adv, use interval and timeout
 #define PERIPHERAL_ADV_INTERVAL                100                      /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
 #define PERIPHERAL_ADV_TIMEOUT_IN_SECONDS      0                        /**< The advertising timeout (in units of seconds). */
 
@@ -139,7 +138,7 @@ static char const m_target_blinky_name[] = "Thingy";
 #define UUID16_SIZE                 2                                   /**< Size of a UUID, in bytes. */
 
 #define THINGY_RSSI_CONNECT_LIMIT   -50
-//vinh add
+//vinh 
 #define CLUSTERHEAD_RSSI_CONNECT_LIMIT   -55
 #ifdef NRF52840_XXAA
 #define APP_DEFAULT_TX_POWER        8
@@ -162,8 +161,9 @@ APP_TIMER_DEF(m_adv_led_blink_timer_id);
 APP_TIMER_DEF(m_scan_led_blink_timer_id);
 APP_TIMER_DEF(m_post_message_delay_timer_id);
 
-
- 
+//vinh
+APP_TIMER_DEF(m_adv_timer_id);    //timer for changing advertising packet
+APP_TIMER_DEF(m_hist_refresh_timer_id);    //timer for delete an ID in history buffer 
 
 //static volatile bool m_service_discovery_in_process = false;
 static char  m_target_clusterhead_name[20]=DEVICE_NAME;
@@ -200,7 +200,9 @@ bool vf_check_destination(uint8_array_t *data);
 static void vf_start_broadcast_data(void);
 static void vf_start_broadcast_data2(void);
 static void vf_stop_broadcast_data(void);
+
 void relay_adv_data2(void);
+void vf_relay_adv_data3(void*);
 //void vf_adv_thingy_connected(ble_evt_t *p_gap_evt) ;
 /*  
 @brief: add a packet to buffer for advertising
@@ -208,16 +210,24 @@ void relay_adv_data2(void);
 @output: error=1  if buffer is full*/
 uint8_t vf_add_packet_to_buffer(uint8_array_t *data);
 uint8_t vf_add_packet_to_buffer2(uint8_array_t *data);
+uint8_t vf_add_packet_to_buffer3(uint8_array_t *data);
+
+void vf_delete_block_buffer3(bool cond);
+
+uint16_t vf_add_buff_adv_hist3(uint32_t ids);
+uint16_t vf_find_id_buff_adv_hist3(uint32_t id);
+void vf_delete_buff_adv_hist3(uint16_t pos);
 /*  
 @brief: check the destination of original incoming broadcast msg is from current node
 @input: data to check
 byte[0] of data->p_data is the source 
 @output: true if byte[0] match CLUSTER_ID*/
 bool vf_check_source(uint8_array_t *data);
-void vf_adv_thingy_data(uint8_t,uint8_t);
 void vf_process_adv_command(uint8_array_t *data);
-void relay_adv_data(void);
+void vf_process_adv_command3(uint8_array_t *br_data);
 
+void relay_adv_data(void);
+void vf_relay_adv_data(void*);
 //check position of packet in buffer array
 //by comparing the 1st 3 bytes:
 //  1st: destination id of broadcast
@@ -228,6 +238,7 @@ void relay_adv_data(void);
 
 static uint16_t vf_validate_relay_packet(uint8_array_t *checkdata);
 static uint16_t vf_validate_relay_packet2(uint8_array_t *checkdata);
+static uint16_t vf_validate_relay_packet3(uint8_array_t *checkdata);
 /*
 @modify relay data by increasing TTL, byte[2] of input
 */
@@ -243,6 +254,31 @@ uint16_t g_userdata_firstpos=0;
 uint16_t g_userdata_currpos=0;
 uint8_t g_packetID=0;
 bool g_is_sink=false;
+
+typedef struct struct_adv_history_buff_type
+{
+  uint32_t id;
+  uint16_t  TTL;
+
+}adv_history_buff_t;
+
+#define MAX_HIST_ADV_BUFF_SIZE 128
+adv_history_buff_t g_buff_adv_hist[MAX_HIST_ADV_BUFF_SIZE];
+uint8_t g_buff_adv_hist_size=0;
+uint8_t g_buff_adv_hist_firstpos=0,g_buff_adv_hist_lastpos=0;
+
+typedef struct struct_thingy_data_type
+{
+  uint8_t local_id;
+  uint8_t link_state;
+  uint8_t button;
+  uint16_t  temperature;
+  uint16_t pressure;
+  uint16_t humidity;
+}thingy_data_t;
+
+void vf_adv_thingy_data(thingy_data_t*);
+
 #define ENABLE_PIN_DEBUGGING 0
 
 #if(ITS_ENABLE_PIN_DEBUGGING == 1)
@@ -589,6 +625,10 @@ static void lbs_c_evt_handler(ble_lbs_c_t * p_lbs_c, ble_lbs_c_evt_t * p_lbs_c_e
 static void thingy_uis_c_evt_handler(ble_thingy_uis_c_t * p_thingy_uis_c, ble_thingy_uis_c_evt_t * p_thingy_uis_c_evt)
 {
     ret_code_t err_code;
+
+    //vinh ver3
+    thingy_data_t thingy_data;
+
     switch (p_thingy_uis_c_evt->evt_type)
     {
         case BLE_LBS_C_EVT_DISCOVERY_COMPLETE:
@@ -599,7 +639,7 @@ static void thingy_uis_c_evt_handler(ble_thingy_uis_c_t * p_thingy_uis_c, ble_th
             err_code = ble_thingy_uis_c_button_notif_enable(p_thingy_uis_c);
             APP_ERROR_CHECK(err_code);
 
-            //version_2
+            //vinh ver2
             //err_code = ble_thingy_uis_c_enviroment_notif_enable(p_thingy_uis_c);
             //APP_ERROR_CHECK(err_code);                        
             err_code = ble_thingy_sensor_c_pressure_notif_enable(p_thingy_uis_c);
@@ -625,8 +665,13 @@ static void thingy_uis_c_evt_handler(ble_thingy_uis_c_t * p_thingy_uis_c, ble_th
             // Forward the data to the app aggregator module
             //vinh change button -> send all sensor data
             app_aggregator_on_blinky_data(p_thingy_uis_c_evt->conn_handle, p_thingy_uis_c_evt->params.button.button_state);
-            //vinh doing
-            //vf_adv_thingy_data(0,AGG_NODE_LINK_DATA_UPDATE);  //broadcast data to sink
+
+            //vinh ver3
+            //send button state to sink
+            thingy_data.local_id=p_thingy_uis_c_evt->conn_handle;
+            thingy_data.link_state=AGG_NODE_LINK_DATA_UPDATE;
+            thingy_data.button=p_thingy_uis_c_evt->params.button.button_state;
+            vf_adv_thingy_data(&thingy_data);  //broadcast data to sink
 
 
                 //vinh doing
@@ -646,9 +691,7 @@ static void thingy_uis_c_evt_handler(ble_thingy_uis_c_t * p_thingy_uis_c, ble_th
  * @param[in] p_adv_report  Advertising report from the SoftDevice.
  */
 
-//vinh temp
-static char str_uart[128];
-static uint16_t str_uart_len=0;
+
 
 
 
@@ -661,6 +704,9 @@ static void on_adv_report(ble_evt_t const * p_ble_evt)
     //vinh
     uint8_array_t userdata;
     size_t i,trim_pos;
+    //vinh
+    static char str_uart[128],str2[10];
+    static uint16_t str_uart_len=0;
     //NRF_LOG_INFO("ADV");
 
     if (m_device_being_connected_info.dev_type == DEVTYPE_NONE)
@@ -733,61 +779,50 @@ static void on_adv_report(ble_evt_t const * p_ble_evt)
               {//found clusterhead name
                   found_clusterhead_data= true;
 
-                  strcpy(str_uart,"find cluster head \n\r");
-                  uart_printf(str_uart);//print to COM port
+                  uart_printf("find cluster head \n\r");//print to COM port
 
-                  //parse user data
+                  //parse data
                   err_code = adv_report_parse(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA, &adv_data, &userdata);
                   if((err_code == NRF_SUCCESS)&&(p_gap_evt->params.adv_report.rssi >CLUSTERHEAD_RSSI_CONNECT_LIMIT))
                   {//have user data
-                    strcpy(str_uart,"find userdata, \n\r");
+                    uart_printf("find userdata, $RSSI=%d \n\r",p_gap_evt->params.adv_report.rssi);
+                    str_uart[0]=0;
+                    for(i=0;i<userdata.size;i++)
+                    {
+                     sprintf(str2,"%d ",userdata.p_data[i]);
+                     strcat(str_uart,str2);
+                    }
+                    strcat(str_uart,"\n\r");
                     uart_printf(str_uart);
-                    uart_printf("$RSSI %d \n\r",p_gap_evt->params.adv_report.rssi);                    
+
                       
                     if(vf_check_source(&userdata)==true)
                     {//message return to source, do nothing
-                       strcpy(str_uart,"reflect data userdata \n\r");
+                       strcpy(str_uart,"reflect data \n\r");
                        uart_printf(str_uart); //print to COM port
                     }
-
                     else
                     {//message from another source
                         if(vf_check_destination(&userdata)==true)
-                        {//match destination -> process data
- 
+                        {//match destination -> process data 
                             strcpy(str_uart,"process data \n\r");
                             uart_printf(str_uart);  //print to COM port
-                             vf_process_adv_command(&userdata); 
-                            i=0xFFFE;
+                            vf_process_adv_command3(&userdata); 
                         }
                         else 
-                        {//not destination ->validate packet(check redundant packet in buffer)
-                            // ->relay data
-                          //i=vf_validate_relay_packet(&userdata);
-                          i=vf_validate_relay_packet2(&userdata); 
+                        {//not destination -> message to be relayed
+                        //validate message(check for redundant message in buffer)
+                          if(vf_validate_relay_packet3(&userdata)==0xFFFF) 
+                            err_code=vf_add_packet_to_buffer3(&userdata); //new message, add msg to buffer for advertising
+                          else
+                            uart_printf("Redundant packet\n\r"); //message has already been in buffer 
                         }
-                      if((i==0xFFFF)||(i==0xFFFE))
-                      {//new packet
-                        if(i==0xFFFF){
-                          //vf_modify_relay_data(&userdata); //increase TTL before relay
-                          err_code=vf_add_packet_to_buffer2(&userdata); //add packet to buffer for advertising
-                        }
-                        //err_code=vf_add_packet_to_buffer(&userdata);
-
-                      }//end new packet
-                      else
-                      {
-                        uart_printf("Redundant packet\n\r");
-                      }
-                      
                     }//end message from another source
-
-                    //relay_adv_data(); //broad cast buffer
-
                   }//end having user data
               }//end found cluster head
             }
-            relay_adv_data2();  //broadcast next packet in buffer
+            //vinh ver3
+            //relay_adv_data2();  //broadcast next packet in buffer
             /*-----------------
             end clusterhead advertising recevier handler
             ---------------------*/
@@ -796,7 +831,7 @@ static void on_adv_report(ble_evt_t const * p_ble_evt)
             // Look for Thingy UUID
             // Filter on RSSI to avoid connecting to everything in the room
             const uint8_t thingy_service_uuid[] = {0x42, 0x00, 0x74, 0xA9, 0xFF, 0x52, 0x10, 0x9B, 0x33, 0x49, 0x35, 0x9B, 0x00, 0x01, 0x68, 0xEF};
-            //vinh change
+            //vinh 
             //if(p_gap_evt->params.adv_report.rssi > THINGY_RSSI_CONNECT_LIMIT || found_blinky_name)
             if(p_gap_evt->params.adv_report.rssi > THINGY_RSSI_CONNECT_LIMIT && found_blinky_name)
             {
@@ -859,11 +894,13 @@ static uint8_t peer_addr_LR[NRF_SDH_BLE_CENTRAL_LINK_COUNT][6];
  */
 
  //vinh 0, important function
- //Duc, event when smartphone/cluster head
 static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
 {
     ret_code_t err_code;
     static uint8_t coded_phy_conn_count = 0;
+
+    //vinh ver3
+    thingy_data_t thingy_data;
 
     // For readability.
     ble_gap_evt_t const * p_gap_evt = &p_ble_evt->evt.gap_evt;
@@ -904,10 +941,13 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
                         
                         err_code = ble_thingy_uis_c_handles_assign(&m_thingy_uis_c[p_gap_evt->conn_handle],
                                                                    p_gap_evt->conn_handle, NULL);
-                        //version2
+                        //vinh ver2
                         if(g_is_sink==false)
                         {//advertise this new node to sink
-                          vf_adv_thingy_data(p_gap_evt->conn_handle,AGG_NODE_LINK_CONNECTED);
+                          thingy_data.local_id=p_gap_evt->conn_handle;
+                          thingy_data.link_state=AGG_NODE_LINK_CONNECTED;
+
+                          vf_adv_thingy_data(&thingy_data);
                         //vf_adv_thingy_data(p_gap_evt,AGG_NODE_LINK_CONNECTED); //advertising to sink new thingy 
                         }
 
@@ -960,7 +1000,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             }
             // Handle links as a peripheral here
             else
-            {// Duc commented "connected to phone"
+            {//connected to phone
                 //vinh doing
                 g_is_sink=true;
 
@@ -1017,7 +1057,11 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
                 //vinh
                 if(g_is_sink==false)
                 {//advertise this new node to sink
-                  vf_adv_thingy_data(p_gap_evt->conn_handle,AGG_NODE_LINK_DISCONNECTED);
+                          thingy_data.local_id=p_gap_evt->conn_handle;
+                          thingy_data.link_state=AGG_NODE_LINK_DISCONNECTED;
+                          vf_adv_thingy_data(&thingy_data);
+
+                 // vf_adv_thingy_data(p_gap_evt->conn_handle,AGG_NODE_LINK_DISCONNECTED);
                 //vf_adv_thingy_data(p_gap_evt,AGG_NODE_LINK_CONNECTED); //advertising to sink new thingy 
                 }
                 
@@ -1026,7 +1070,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             }
             // Handle peripheral disconnect
             else
-            {// Duc commented phone disconnected
+            {//phone disconnected
 
                 //vinh
                 g_is_sink=false;
@@ -1142,7 +1186,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
 /**@brief Function for initializing services that will be used by the application.
  */
 static void services_init(void)
-{//vinh stop
+{
     uint32_t       err_code;
     ble_agg_cfg_service_init_t agg_cfg_service_init;
 
@@ -1348,6 +1392,77 @@ void vf_delete_block_buffer(void)
 
 
 /*---------------------
+@Brief: remove a block from advertising buffer chain
+input: @ref cond:
+                    true: remove block ids (0x00AABBCC, AA:<source id>, BB<dest id>, CC<packet id)) will be added to hist buff
+                    false: not added
+       @ref g_userdata_currpos: block to be deleted in advertising buffer (g_userdata)
+ouput:
+update:
+  g_userdata_currpos: point to next position in buffer
+  g_userdata.size: number of used block in buffer
+*/
+
+void vf_delete_block_buffer3(bool cond)
+{//remove current block to the chain
+  uint8_t pos,nextpos,prepos,pos1;
+  size_t i;
+  uint32_t ids;
+
+  //save current id
+  pos1=g_userdata_currpos;
+  pos=g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE;
+  ids=((uint32_t)g_userdata.p_data[pos+5]<<16)+((uint32_t)g_userdata.p_data[pos+6]<<8)+(uint32_t)g_userdata.p_data[pos+7];
+
+  if(g_userdata.size==0)
+  {//no available block in buffer
+    return;
+  }
+  else if(g_userdata.size==1)
+  {//only 1 block, then reset all pointer to initial state
+    g_userdata.p_data[pos]=0x00;
+    g_userdata_firstpos=g_userdata_currpos=g_userdata_lastpos=0;
+    g_userdata.size=0;
+   
+  }
+  else
+  {
+    if(pos==g_userdata_firstpos)
+    {//current block is the first block
+       nextpos=g_userdata.p_data[pos+1];                 
+       g_userdata.p_data[nextpos*MAX_USERDATA_BUFFER_BLOCKSIZE+2]=0x00;
+       g_userdata_currpos=nextpos;
+    }
+    else if (pos==g_userdata_lastpos)
+    {//current block is the last block
+      prepos=g_userdata.p_data[pos+2];
+       g_userdata.p_data[prepos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]=0x00;
+      g_userdata_currpos=g_userdata_firstpos;
+    }
+    else{
+       nextpos=g_userdata.p_data[pos+1];
+       prepos=g_userdata.p_data[pos+2];
+       g_userdata.p_data[nextpos*MAX_USERDATA_BUFFER_BLOCKSIZE+2]=prepos;
+       g_userdata.p_data[prepos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]=nextpos;
+       g_userdata_currpos=nextpos;
+    }
+    g_userdata.size--;
+
+
+
+  }
+    uart_printf("delete block %d \n\r",pos1);
+  if(cond==true)
+  {// add ids to history buffer
+      vf_add_buff_adv_hist3(ids);
+  }
+}
+
+
+
+
+
+/*---------------------
 @Brief: advertising a packet in buffer by pasting it to user data field of adv struct
 g_userdata_currpos: packet to be sent
 g_userdata_firstpos: first packet block in buffer
@@ -1407,6 +1522,73 @@ void relay_adv_data2(void)
    
 }
 
+
+/*---------------------
+@Brief: advertising a packet in buffer by pasting it to user data field of adv struct
+g_userdata_currpos: packet to be sent
+g_userdata_firstpos: first packet block in buffer
+g_userdata_lastpos: last packet block in buffer
+g_userdata.size: number of used block in buffer
+*/
+
+void vf_relay_adv_data3(void* p_indata)
+{
+
+    ret_code_t err_code;
+    uint8_t i,j=0;
+
+    uint8_t advlen=org_adv_data_size;
+    static uint8_t relay_data[32];
+    uint8_t relay_size;
+
+
+
+    while(g_userdata.size>0) //check nubmer of used block
+    {
+          if(g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+4]==0)
+          {//size of broadcast data =0 (invalid block) ->delete block, not add to history buffer
+            vf_delete_block_buffer3(false);
+          }
+          else
+          {
+            //get position of data block to be transfered 
+            if(g_userdata_currpos==g_userdata_lastpos) //reach lastpos -> first pos 
+                g_userdata_currpos=g_userdata_firstpos;
+            else
+              g_userdata_currpos=g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+1];
+
+            relay_size= g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+4];
+            relay_data[0]=relay_size;
+            relay_data[1]=0xff; //type: MANUFACTURER  
+            memcpy(&relay_data[2],&g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+5],relay_size);
+            relay_data[5]++; //increase hop counts
+
+            memcpy(&adv_packet.adv_data.p_data[advlen],relay_data,relay_size+1); //copy data to broadcast
+            adv_packet.adv_data.len=org_adv_data_size+relay_size+1;
+
+            if(--g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+3]==0)
+            { // advertised more than 2 times, then move this block to history buffer
+                vf_delete_block_buffer3(true);
+            }
+
+
+            uart_printf("adv relay data (len)%d @%d",adv_packet.adv_data.len,g_userdata_currpos );
+            j++;
+            for(int i=0;i<adv_packet.adv_data.len;i++)
+            {
+                uart_printf("%d  ",adv_packet.adv_data.p_data[i] );
+            }
+            uart_printf("\n\r");
+           
+
+            break;
+          }
+
+        if(g_userdata.size==0) vf_stop_broadcast_data();
+
+    }//while
+   
+}
 
 //advertising to sink new thingy 
  /*void vf_adv_thingy_connected(ble_evt_t *p_gap_evt) 
@@ -1483,7 +1665,7 @@ static uint16_t vf_validate_relay_packet(uint8_array_t *checkdata)
       if(memcmp(checkdata->p_data,cmpdata,3)==0)
       {//matched
         if(checkdata->p_data[3]>cmpdata[3])
-        {//update hop count if new is higher than old
+        {//update TTL if new is higher than old
           garr_userdata[temp_pos-1]=checkdata->p_data[3];
         }
 
@@ -1509,7 +1691,7 @@ static uint16_t vf_validate_relay_packet(uint8_array_t *checkdata)
 
 /*
 @brief: validate relay data, looking up in the buffer to find an element match with new data:
-1. source addr (byte 0), destination addr(byte 1), packet id(byte2) 
+1. source id (byte 0), destination id(byte 1), packet id(byte2) 
 2. if (1.) match, check time to live (byte 3) and update the new to old if the new is higher
  return the position of match item
 3.  if (1.) not match, return 0xFFFF -> new packet
@@ -1577,6 +1759,8 @@ static uint16_t vf_validate_relay_packet2(uint8_array_t *checkdata)
   return 0xFFFF;
 }
 
+
+
 /*--------------------
 @brief: modify input data to preparing send back to the source
 */
@@ -1587,8 +1771,354 @@ void vf_process_adv_command(uint8_array_t *data)
 
 //vinh doing
     vf_app_adv_data_send_to_phone(data);
+}
+
+
+/*-----------------------------------------------
+@brief: validate incomming data, check whether this message was recevice before.
+@input: *checkdata:  source addr (byte 0), destination addr(byte 1), packet id(byte2)
+   -> merge into 32 bits var ids= 0x00AABBCC, with AA is source id, BB is destination id, CC is packet id
+@operation:
+  compare ids with:
+    - history buffer which contains ids of old messages
+        which was either removed from advertising buffer(g_userdata) or processed.
+    - if no matched item in history buffer, compare with current advertising buffer(g_userdata)
+
+@return
+   if matched found, return the position of the packet
+      in history buffer (=0x8000+pos) or advertising buffer (pos)
+    else return 0xFFFF -> new packet
+*/
+static uint16_t vf_validate_relay_packet3(uint8_array_t *checkdata)
+{
+  uint8_t *cmpdata_pos;
+  uint16_t i;
+  uint32_t ids=0,cmp_data;
+  size_t temp_pos;
+  size_t pos=g_userdata_firstpos;
+
+  ids=((uint32_t)checkdata->p_data[0]<<16)+((uint32_t)checkdata->p_data[1]<<8)+(uint32_t)(checkdata->p_data[2]);
+
+  //check history buffer
+  if (vf_find_id_buff_adv_hist3(ids)!=0xFFFF) return i+8000; //already in history buffer
+
+  //check current buffer
+  if(g_userdata.size==0)
+    return 0xFFFF;
+  else if(g_userdata.size==1)
+  {
+    do
+    {
+      temp_pos=pos*MAX_USERDATA_BUFFER_BLOCKSIZE+5; 
+      cmpdata_pos=&g_userdata.p_data[temp_pos];
+      cmp_data=((*cmpdata_pos)<<16)+((*(cmpdata_pos+1))<<8)+(*(cmpdata_pos+2));
+      if(cmp_data==ids)
+      {
+        return pos;
+      }
+      else
+      {
+        return 0xFFFF;
+      }
+      pos=g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+1];
+    }
+    while (pos!=g_userdata_lastpos);
+  }
+  return 0xFFFF;
+}
+
+
+
+/*----------
+@brief: add an id value to buffer of adverting history
+@input: id value (0x00AABBCC, AA: source id, BB: dest id, CC:packet id)
+@ouput: position in the array g_buff_adv_hist,
+    0xFFFF if this id has already been in the buffer
+----------------------*/
+uint16_t vf_add_buff_adv_hist3(uint32_t ids)
+{
+  uint16_t i;
+
+    //check current id has already been in history buffer?
+    if((i=vf_find_id_buff_adv_hist3(ids))!=0xFFFF) return 0xFFFF; //yes -> quit
+
+    g_buff_adv_hist[g_buff_adv_hist_lastpos].id=ids;
+    g_buff_adv_hist[g_buff_adv_hist_lastpos].TTL=10; //timeout 10 sec
+    if(g_buff_adv_hist_size!=MAX_HIST_ADV_BUFF_SIZE)
+    {
+      if(++g_buff_adv_hist_lastpos==MAX_HIST_ADV_BUFF_SIZE)
+          g_buff_adv_hist_lastpos=0;
+    }
+    else
+    {
+      if(++g_buff_adv_hist_lastpos==MAX_HIST_ADV_BUFF_SIZE)
+          g_buff_adv_hist_lastpos=0;
+      g_buff_adv_hist_firstpos=g_buff_adv_hist_lastpos;
+    }
+
+    if(g_buff_adv_hist_size<MAX_HIST_ADV_BUFF_SIZE) g_buff_adv_hist_size++;
+      
+
+    uart_printf("add to history 0x%x, lastpos:%d, fisrtpos:%d, size:%d \n\r", \
+                ids,g_buff_adv_hist_lastpos,g_buff_adv_hist_firstpos,g_buff_adv_hist_size);
+  return g_buff_adv_hist_size;
+}
+
+/*----------
+@brief: delete an element in buffer of advertising history
+@input: position
+*/
+void vf_delete_buff_adv_hist3(uint16_t pos)
+{
+  uint16_t i,size;
+
+    if(g_buff_adv_hist_size==0)   return;
+    g_buff_adv_hist_size--;
+    if(++g_buff_adv_hist_firstpos==MAX_HIST_ADV_BUFF_SIZE)
+      g_buff_adv_hist_firstpos=0;
+  return ;
+}
+
+/*----------
+@brief: search for position of id value (0x00AABBCC, AA: source id, BB: dest id, CC:packet id)
+ in buffer advertising history
+@input: id value
+@ouput: position in the array g_buff_adv_hist, 0xFFFF if no match position
+*/
+uint16_t vf_find_id_buff_adv_hist3(uint32_t id)
+{
+  uint16_t i;
+
+    if(g_buff_adv_hist_size==0) return 0xFFFF;
+    if(g_buff_adv_hist_firstpos<g_buff_adv_hist_lastpos)
+    {
+        for(i=g_buff_adv_hist_firstpos;i<g_buff_adv_hist_lastpos;i++)
+        {
+          if(id==g_buff_adv_hist[i].id)
+          {
+            return i ;
+          }
+        }
+    }
+    else
+    {
+        for(i=g_buff_adv_hist_firstpos;i<MAX_HIST_ADV_BUFF_SIZE;i++)
+        {
+          if(id==g_buff_adv_hist[i].id)
+          {
+            return i ;
+          }
+        }
+        for(i=0;i<g_buff_adv_hist_lastpos;i++)
+        {
+          if(id==g_buff_adv_hist[i].id)
+          {
+            return i ;
+          }
+        }
+    }
+
+  return 0xFFFF;
+}
+
+/*----------
+@brief: search for position of id value (0x00AABBCC, AA: source id, BB: dest id, CC:packet id)
+ in buffer advertising history
+@input: id value
+@ouput: position in the array g_buff_adv_hist, 0xFFFF if no match position
+*/
+void vf_refresh_history_buff_callback(void * p_context)
+{
+  uint16_t i,j,count=0;
+  uint8_t str1[64]="delete hist buff:",str2[10];
+
+    if(g_buff_adv_hist_size==0) return;
+
+
+    if(g_buff_adv_hist_firstpos<g_buff_adv_hist_lastpos)
+    {
+        for(i=g_buff_adv_hist_firstpos;i<g_buff_adv_hist_lastpos;i++)
+        {
+          if(g_buff_adv_hist[i].TTL>0)
+          {
+            g_buff_adv_hist[i].TTL--; ;
+          }
+        }
+    }
+    else
+    {
+        for(i=g_buff_adv_hist_firstpos;i<MAX_HIST_ADV_BUFF_SIZE;i++)
+        {
+          if(g_buff_adv_hist[i].TTL>0)
+          {
+            g_buff_adv_hist[i].TTL--; ;
+          }
+        }
+        for(i=0;i<g_buff_adv_hist_lastpos;i++)
+        {
+          if(g_buff_adv_hist[i].TTL>0)
+          {
+            g_buff_adv_hist[i].TTL--; ;
+          }
+        }
+    }
+
+    if(g_buff_adv_hist_firstpos<g_buff_adv_hist_lastpos)
+    {
+      for(i=g_buff_adv_hist_firstpos;i<g_buff_adv_hist_lastpos;i++)
+      {
+          if( g_buff_adv_hist[i].TTL==0) break;
+
+      }
+      if(i!=g_buff_adv_hist_lastpos)
+      {
+        count=1;
+
+        sprintf(str2,"%d ",i);
+        strcat(str1,str2);
+
+        for(j=i+1;j<g_buff_adv_hist_lastpos;j++)
+        {
+            if(g_buff_adv_hist[j].TTL!=0)
+            {
+              g_buff_adv_hist[i++]=g_buff_adv_hist[j];
+
+              sprintf(str2,"%d ",j);
+              strcat(str1,str2);
+
+            }
+            else
+            {
+              count++;
+            }
+
+        }
+        g_buff_adv_hist_lastpos=i;
+        g_buff_adv_hist_size-=count;
+
+        strcat(str1,"\n\r");
+        uart_printf(str1);
+      }
+
+    }
+    else
+    {
+      for(i=g_buff_adv_hist_firstpos;i<MAX_HIST_ADV_BUFF_SIZE;i++)
+      {
+          if( g_buff_adv_hist[j].TTL==0) break;
+
+      }
+      if(i!=MAX_HIST_ADV_BUFF_SIZE)
+      {
+        count=1;
+
+        sprintf(str2,"%d ",i);
+        strcat(str1,str2);
+
+        for(j=i+1;j<MAX_HIST_ADV_BUFF_SIZE;j++)
+        {
+            if(g_buff_adv_hist[j].TTL!=0)
+            {
+              g_buff_adv_hist[i++]=g_buff_adv_hist[j];
+              sprintf(str2,"%d ",j);
+              strcat(str1,str2);
+
+            }
+            else
+            {
+              count++;
+            }
+
+        }
+        for(j=0;j<g_buff_adv_hist_lastpos;j++)
+        {
+            if(g_buff_adv_hist[j].TTL!=0)
+            {
+              g_buff_adv_hist[i++]=g_buff_adv_hist[j];
+              sprintf(str2,"%d ",j);
+              strcat(str1,str2);
+
+            }
+            else
+            {
+              count++;
+            }
+            if(i>=MAX_HIST_ADV_BUFF_SIZE) i=0;
+
+        }
+
+        g_buff_adv_hist_lastpos=i;
+        g_buff_adv_hist_size-=count;
+
+        strcat(str1,"\n\r");
+        uart_printf(str1);
+      }
+      else
+      {
+          for(i=0;i<g_buff_adv_hist_lastpos;i++)
+          {
+              if( g_buff_adv_hist[j].TTL==0) break;
+
+          }
+          if(i!=g_buff_adv_hist_lastpos)
+          {
+            count=1;
+              sprintf(str2,"%d ",i);
+              strcat(str1,str2);
+            for(j=i+1;j<g_buff_adv_hist_lastpos;j++)
+            {
+                if(g_buff_adv_hist[j].TTL!=0)
+                {
+                  g_buff_adv_hist[i++]=g_buff_adv_hist[j];
+                  sprintf(str2,"%d ",j);
+                  strcat(str1,str2);
+                }
+                else
+                {
+                  count++;
+                }
+
+            }
+            g_buff_adv_hist_lastpos=i;
+            g_buff_adv_hist_size-=count;
+
+            strcat(str1,"\n\r");
+            uart_printf(str1);
+          }
+      }
+
+    }
+
+
+  
+
+
+  return;
+
 
 }
+
+/*--------------------
+@brief: process command from the source
+    1. compare new data has been processed before by buffer of advertising history
+    2. If not, process command, else quit
+@input: broadcast data
+*/
+void vf_process_adv_command3(uint8_array_t *br_data)
+{//send to phone
+  //if(g_is_sink==true) vinh doing
+  uint32_t ids;
+  ids=(((uint32_t)br_data->p_data[0])<<16)+(((uint32_t)br_data->p_data[1])<<8)+((uint32_t)br_data->p_data[2]);
+
+  if(vf_validate_relay_packet3(br_data)==0xFFFF)
+  {//new data
+    vf_app_adv_data_send_to_phone(br_data); //process -> send data to phone
+    vf_add_buff_adv_hist3(ids); //add this id to history buffer
+  }
+  else 
+    uart_printf("duplicate command \n\r");
+}
+
 
 /*------------
 start advertising dummy data using buffer
@@ -1639,7 +2169,7 @@ static void vf_start_broadcast_data(void)
   buff[19]=14;
   buffdata.p_data=&buff[2];
   buffdata.size=18;
-  vf_add_packet_to_buffer2(&buffdata);
+  vf_add_packet_to_buffer3(&buffdata);
   //memcpy(&adv_packet.adv_data.p_data[org_adv_data_size],buff,20);
 
 
@@ -1716,14 +2246,14 @@ static void vf_stop_broadcast_data(void)
     uart_printf(" stop broadcast userdata \n\r");
 
     err_code=sd_ble_gap_adv_stop(m_adv_handle);
-    uart_printf("$r1 %d ",err_code);
+    //uart_printf("$r1 %d ",err_code);
 
     memset(buff,0,32);
     memcpy(&adv_packet.adv_data.p_data[org_adv_data_size],buff,20);   
 
        err_code = sd_ble_gap_adv_start(m_adv_handle, APP_BLE_CONN_CFG_TAG);
     //APP_ERROR_CHECK(err_code);
-    uart_printf("$r3 %d ",err_code);
+    //uart_printf("$r3 %d ",err_code);
 }
 
 bool vf_check_source(uint8_array_t *data)
@@ -1739,7 +2269,7 @@ bool vf_check_destination(uint8_array_t *data)
 }
 
 
-void vf_adv_thingy_data(uint8_t id,uint8_t state)
+void vf_adv_thingy_data(thingy_data_t *data)
 {
 
 
@@ -1752,19 +2282,20 @@ void vf_adv_thingy_data(uint8_t id,uint8_t state)
   idata.p_data[1]=SINK_ID; //cluster destination id
   idata.p_data[2]=g_packetID++; //packet No
   idata.p_data[3]=0; //hop counts  
-  idata.p_data[4]=state; //link state 
-  idata.p_data[5]=id; //local id
-  switch(state)
+  idata.p_data[4]=data->link_state; //link state 
+  idata.p_data[5]=data->local_id; //local id
+  switch(data->link_state)
   {
     case AGG_NODE_LINK_CONNECTED:
 
-        idata.p_data[6]=12;//temp1
-        idata.p_data[7]=12;//temp1
-        idata.p_data[8]=34;//pressure1
-        idata.p_data[9]=56;//pressure2         
-        idata.p_data[10]=00;//hummi 1
-        idata.p_data[11]=78;//hummi 2
-        idata.size=12;
+        idata.p_data[6]=0x12;//temp1
+        idata.p_data[7]=0x12;//temp1
+        idata.p_data[8]=0x34;//pressure1
+        idata.p_data[9]=0x56;//pressure2         
+        idata.p_data[10]=0x00;//hummi 1
+        idata.p_data[11]=0x78;//hummi 2
+        idata.p_data[12]=0x0;//button state
+        idata.size=13;
         break;
 
     case AGG_NODE_LINK_DISCONNECTED:
@@ -1772,13 +2303,14 @@ void vf_adv_thingy_data(uint8_t id,uint8_t state)
         break;
 
     case AGG_NODE_LINK_DATA_UPDATE:
-        idata.p_data[6]=12;//temp1
-        idata.p_data[7]=12;//temp1
-        idata.p_data[8]=34;//pressure1
-        idata.p_data[9]=56;//pressure2         
-        idata.p_data[10]=00;//hummi 1
-        idata.p_data[11]=78;//hummi 2
-        idata.size=12;
+        idata.p_data[6]=data->temperature>>8;//temp1
+        idata.p_data[7]=(uint8_t)(data->temperature&0x00FF);//temp1
+        idata.p_data[8]=data->pressure>>8;//pressure1
+        idata.p_data[9]=(uint8_t)(data->pressure&0x00FF);//pressure2         
+        idata.p_data[10]=data->humidity>>8;//hummi 1
+        idata.p_data[11]=(uint8_t)(data->humidity&0x00FF);//hummi 2
+        idata.p_data[12]=data->button;//button state
+        idata.size=13;
         break;
   }
 
@@ -1790,8 +2322,10 @@ void vf_adv_thingy_data(uint8_t id,uint8_t state)
     uart_printf(str1);
   }
   uart_printf("\r\n");
-  vf_add_packet_to_buffer2(&idata);
-  relay_adv_data2();
+  vf_add_packet_to_buffer3(&idata);
+  
+  //vinh ver3
+ // relay_adv_data2();
 }
 
 
@@ -1916,6 +2450,91 @@ uint8_t vf_add_packet_to_buffer2(uint8_array_t *data)
 }
 
 
+/*--------------------------------
+@brief: add broadcast data to buffer for advertising
+@input: user data in *data
+@output: return value 0: success, 1: buffer full
+
+data is coupled into buffer at the posiont pointed by g_userdata_lastpos
+
+Structure of a block (32 bytes)
+  byte 0: block property: 0x0: free, 0xFF: used
+  byte 1: pointer to next available block,0xFF is NULL
+  byte 2: pointer to previous available block,0xFF is NULL
+  byte 3: number of advertsing times before removing
+  byte 4: size (=(size of broadcase data)+1)
+  byte 5..n: broadcast data
+          broadcast data (br_data)
+            byte 0: source id
+            byte 1: destination id
+            byte 2: packet id
+            byte 3: hop counts
+            byte 4..18: user data 
+
+//g_userdata_lastpos: position of last block in buffer
+//g_userdata_firstpos: position of last block in buffer
+//g_userdata_currpos: position of current block which is adverting
+//g_userdata : buffer
+---------*/
+
+uint8_t vf_add_packet_to_buffer3(uint8_array_t *br_data)
+{
+
+  uint8_array_t *userdata=br_data;
+  uint8_t err_code=1;
+  size_t pos,i;
+  if((g_userdata.size)<MAX_USERDATA_BUFFER_BLOCK)
+  {//buffer not overflow
+
+      for(i=0;i<MAX_USERDATA_BUFFER_BLOCK;i++)
+      {
+        if(g_userdata.p_data[i*MAX_USERDATA_BUFFER_BLOCKSIZE]==0) //found free block
+        {
+          err_code=0;
+          break;
+        }
+      }
+      
+      if(err_code==0)
+      {  
+      //found free block
+        pos=i;
+        if( g_userdata.size==0)
+        {
+          g_userdata.p_data[pos*32+1]=g_userdata.p_data[pos*32+2]=0xFF; 
+          g_userdata_currpos=g_userdata_lastpos=g_userdata_firstpos=pos;
+        }
+        else
+        {
+          g_userdata.p_data[g_userdata_lastpos*32+1]=pos; //update previous "next block pointer"
+          g_userdata.p_data[pos*32+2]=g_userdata_lastpos; //update current "pre block pointer"
+          g_userdata_lastpos=pos; //update last position
+        }
+        g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE]=0xFF;  //mark as used block
+        g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+3]=2;  //advertise 2 times before remove this block
+        g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+4]=userdata->size+1; //number of data byte in this block, include this byte
+        memcpy(&g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+5],userdata->p_data,userdata->size);
+        g_userdata.size++;
+      } 
+
+  }//end buffer not overflow
+
+  if (err_code==0)
+  {
+       uart_printf("add data to buffer @%d $%d $%d *",g_userdata.size,g_userdata_lastpos,userdata->size); 
+       for(i=0;i<userdata->size+1+4;i++)
+       {
+          uart_printf("%d ", g_userdata.p_data[g_userdata_lastpos*MAX_USERDATA_BUFFER_BLOCKSIZE+i]);
+       }
+      uart_printf("\n\r");
+  }
+  else
+  {
+    uart_printf("Buffer full");
+  }
+  return err_code;
+}
+
 /**@brief Function for setting up advertising data. */
 static void advertising_data_set(void)
 {
@@ -1953,7 +2572,7 @@ static void advertising_data_set(void)
     //student: initial advertising data
     org_adv_data_size=adv_packet.adv_data.len;  //mark the start position of datafield 
 
-    adv_packet.adv_data.p_data[org_adv_data_size+0]=19; //length
+    /*adv_packet.adv_data.p_data[org_adv_data_size+0]=19; //length
     adv_packet.adv_data.p_data[org_adv_data_size+1]=0xff; //type
     adv_packet.adv_data.p_data[org_adv_data_size+2]=CLUSTER_ID; //source
     adv_packet.adv_data.p_data[org_adv_data_size+3]=SINK_ID; //destination
@@ -1972,7 +2591,7 @@ static void advertising_data_set(void)
     adv_packet.adv_data.p_data[org_adv_data_size+16]=0x1; //data 11
     adv_packet.adv_data.p_data[org_adv_data_size+17]=0x1; //data 12
     adv_packet.adv_data.p_data[org_adv_data_size+18]=0x1; //data 13
-    adv_packet.adv_data.p_data[org_adv_data_size+19]=0x1; //data 14
+    adv_packet.adv_data.p_data[org_adv_data_size+19]=0x1; //data 14*/
 
     memset(&adv_packet.adv_data.p_data[org_adv_data_size],0,20);
     adv_packet.adv_data.len=org_adv_data_size+20; //length
@@ -1981,7 +2600,6 @@ static void advertising_data_set(void)
     //adv_params.properties.connectable = 1;
     //adv_params.properties.scannable = 1;
     //adv_params.properties.legacy_pdu = 1;
-    // Duc GAP settings for advertising here
     adv_params.properties.type = BLE_GAP_ADV_TYPE_CONNECTABLE_SCANNABLE_UNDIRECTED;
     adv_params.p_peer_addr   = NULL;
     adv_params.filter_policy = BLE_GAP_ADV_FP_ANY;
@@ -1994,6 +2612,7 @@ static void advertising_data_set(void)
 
     err_code = sd_ble_gap_adv_set_configure(&m_adv_handle, &adv_packet, &adv_params);
     APP_ERROR_CHECK(err_code);
+    
  
 }
 
@@ -2008,6 +2627,15 @@ static void advertising_start(void)
     
     err_code = app_timer_start(m_adv_led_blink_timer_id, APP_TIMER_TICKS(500), 0);
     APP_ERROR_CHECK(err_code);
+
+    //vinh, start advertising timer with 200ms interval to change advertising packet in buffer
+    err_code = app_timer_start(m_adv_timer_id, APP_TIMER_TICKS(200), 0);
+    APP_ERROR_CHECK(err_code);
+
+    //timer for delete a history id if history buffer
+    //err_code = app_timer_start(m_hist_refresh_timer_id, APP_TIMER_TICKS(1000), 0);
+    //APP_ERROR_CHECK(err_code);
+
 }
 
 
@@ -2421,6 +3049,13 @@ static void timer_init(void)
     APP_ERROR_CHECK(err_code);
     
     err_code = app_timer_create(&m_post_message_delay_timer_id, APP_TIMER_MODE_SINGLE_SHOT, post_message_connect_callback);
+
+    //vinh ver3
+    err_code = app_timer_create(&m_adv_timer_id, APP_TIMER_MODE_REPEATED, vf_relay_adv_data3);
+    err_code = app_timer_create(&m_hist_refresh_timer_id, APP_TIMER_MODE_REPEATED, vf_refresh_history_buff_callback);
+
+
+
 }
 
 
@@ -2499,6 +3134,10 @@ int main(void)
     g_userdata_currpos=g_userdata_lastpos=g_userdata_firstpos;
     g_userdata.size=0;  
     memset(garr_userdata,0,sizeof(garr_userdata));
+    memset(&g_buff_adv_hist,0,sizeof(g_buff_adv_hist));
+    g_buff_adv_hist_firstpos=g_buff_adv_hist_lastpos=0;
+    g_buff_adv_hist_size=0;
+
 
     log_init();
     timer_init();

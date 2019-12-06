@@ -8,7 +8,7 @@
 
 enum {APP_AGG_ERROR_CONN_HANDLE_CONFLICT = 1, APP_AGG_ERROR_LINK_INFO_LIST_FULL, APP_AGG_ERROR_CONN_HANDLE_NOT_FOUND};
 
-//vinh ver2
+//vinh ver2 : this enum has been moved to app_aggregator.h
 //enum TX_COMMANDS {AGG_BLE_LINK_CONNECTED = 1, AGG_BLE_LINK_DISCONNECTED, AGG_BLE_LINK_DATA_UPDATE, AGG_BLE_LED_BUTTON_PRESSED};
 //enum TX_COMMANDS {AGG_BLE_LINK_CONNECTED = 1, AGG_BLE_LINK_DISCONNECTED, AGG_BLE_LINK_DATA_UPDATE, AGG_BLE_LED_BUTTON_PRESSED,\
                // AGG_NODE_LINK_CONNECTED, AGG_NODE_LINK_DISCONNECTED, AGG_NODE_LINK_DATA_UPDATE, AGG_NODE_LED_BUTTON_PRESSED};
@@ -503,8 +503,8 @@ void vf_app_adv_data_send_to_phone(uint8_array_t *data)
   char str1[10]="Thingy",str2[10];
 
   thingy_id=data->p_data[0]<<8+ data->p_data[5];
-  sprintf(str2,"0x%x :",thingy_id);
-  strcat(str1,str2);
+  //sprintf(str2,"0x%x :",thingy_id);
+  //strcat(str1,str2);
   uart_printf(str1); 
 
 
@@ -529,15 +529,17 @@ void vf_app_adv_data_send_to_phone(uint8_array_t *data)
         tx_command_payload[8] =  data->p_data[9];; //pressure 2
         tx_command_payload[9] = data->p_data[10];; //hum 1
         tx_command_payload[10] =  data->p_data[11];; //hum 2
-        tx_command_payload_length=11;
+        tx_command_payload[11] =  data->p_data[12];; //button
+
+        tx_command_payload_length=12;
         if(strlen(str1) <= MAX_ADV_NAME_LENGTH)
         {
-            memcpy(&tx_command_payload[11], str1, strlen(str1));
-            tx_command_payload_length = 11 + strlen(str1);
+            memcpy(&tx_command_payload[12], str1, strlen(str1));
+            tx_command_payload_length = 12 + strlen(str1);
         }
         else 
         {
-            tx_command_payload_length = 11;
+            tx_command_payload_length = 12;
         }
 
         break;
@@ -556,7 +558,8 @@ void vf_app_adv_data_send_to_phone(uint8_array_t *data)
         tx_command_payload[8] =  data->p_data[9];; //pressure 2
         tx_command_payload[9] = data->p_data[10];; //hum 1
         tx_command_payload[10] =  data->p_data[11];; //hum 2
-        tx_command_payload_length=11;
+        tx_command_payload[11] =  data->p_data[12];; //button
+        tx_command_payload_length=12;
         break;
   }
 
