@@ -86,7 +86,7 @@
 //student: CLuster head Configuration
 ----------*/
 #define CLUSTER_ID     10
-#define DEVICE_NAME             "DCH"                    /**< Name of device. Will be included in the advertising data. */
+#define DEVICE_NAME             "CH"                    /**< Name of device. Will be included in the advertising data. */
 #define SINK_ID         10       
 
 //vinh
@@ -112,7 +112,7 @@ static char const m_target_blinky_name[] = "Thingy";
 #define MAX_CONN_PARAMS_UPDATE_COUNT    3    
 
 #define PERIPHERAL_ADV_INTERVAL                100                      /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
-#define PERIPHERAL_ADV_TIMEOUT_IN_SECONDS      10                        /**< The advertising timeout (in units of seconds). */
+#define PERIPHERAL_ADV_TIMEOUT_IN_SECONDS      0                        /**< The advertising timeout (in units of seconds). */
 
 #define PERIPHERAL_ADV_CON_LED      BSP_BOARD_LED_0
 #define CENTRAL_SCANNING_LED        BSP_BOARD_LED_1
@@ -137,13 +137,13 @@ static char const m_target_blinky_name[] = "Thingy";
 
 #define UUID16_SIZE                 2                                   /**< Size of a UUID, in bytes. */
 
-#define THINGY_RSSI_CONNECT_LIMIT   -50
+#define THINGY_RSSI_CONNECT_LIMIT   -60
 //vinh 
 #define CLUSTERHEAD_RSSI_CONNECT_LIMIT   -80
 #ifdef NRF52840_XXAA
 #define APP_DEFAULT_TX_POWER        8
 #else
-#define APP_DEFAULT_TX_POWER        4
+#define APP_DEFAULT_TX_POWER        4                                   /**< Supported tx_power values: -40dBm, -20dBm, -16dBm, -12dBm, -8dBm, -4dBm, 0dBm, +3dBm and +4dBm.*/
 #endif
 
 #define MAX_USERDATA_BUFFER_BLOCK 16
@@ -1421,37 +1421,61 @@ void vf_delete_block_buffer3(bool cond)
   else if(g_userdata.size==1)
   {//only 1 block, then reset all pointer to initial state
     g_userdata.p_data[pos]=0x00;
+    g_userdata.p_data[pos+1]=g_userdata.p_data[pos+2]=0xFF;//NULL
     g_userdata_firstpos=g_userdata_currpos=g_userdata_lastpos=0;
     g_userdata.size=0;
    
   }
   else
   {
-    if(pos==g_userdata_firstpos)
+    if(pos1==g_userdata_firstpos)
     {//current block is the first block
-       nextpos=g_userdata.p_data[pos+1];                 
-       g_userdata.p_data[nextpos*MAX_USERDATA_BUFFER_BLOCKSIZE+2]=0x00;
-       g_userdata_currpos=nextpos;
+       nextpos=g_userdata.p_data[pos+1];
+       g_userdata.p_data[pos]=0x00;//mark deleted block as free block
+       g_userdata.p_data[pos+1]=g_userdata.p_data[pos+2]=0xFF;//NULL
+
+       g_userdata.p_data[nextpos*MAX_USERDATA_BUFFER_BLOCKSIZE+2]= 0xFF; //NULL
+       g_userdata_firstpos=nextpos;
+       if(g_userdata_currpos==pos1)
+       {
+          g_userdata_currpos=g_userdata_firstpos;
+       }
+
     }
-    else if (pos==g_userdata_lastpos)
+    else if (pos1==g_userdata_lastpos)
     {//current block is the last block
       prepos=g_userdata.p_data[pos+2];
-       g_userdata.p_data[prepos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]=0x00;
-      g_userdata_currpos=g_userdata_firstpos;
+       g_userdata.p_data[pos]=0x00; //mark as free block
+       g_userdata.p_data[pos+1]=g_userdata.p_data[pos+2]=0xFF;//NULL
+
+       g_userdata.p_data[prepos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]= 0xFF; //NULL
+       g_userdata_lastpos=prepos;
+       if(g_userdata_currpos==pos1)
+       {
+          g_userdata_currpos=g_userdata_firstpos;
+       }
     }
     else{
        nextpos=g_userdata.p_data[pos+1];
        prepos=g_userdata.p_data[pos+2];
+       g_userdata.p_data[pos]=0x00; //mark as free block
+       g_userdata.p_data[pos+1]=g_userdata.p_data[pos+2]=0xFF;//NULL
+
        g_userdata.p_data[nextpos*MAX_USERDATA_BUFFER_BLOCKSIZE+2]=prepos;
        g_userdata.p_data[prepos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]=nextpos;
-       g_userdata_currpos=nextpos;
+       if(g_userdata_currpos==pos1)
+       {
+          g_userdata_currpos=nextpos;
+       }
+
     }
     g_userdata.size--;
 
 
 
   }
-    uart_printf("delete block %d \n\r",pos1);
+    uart_printf("delete block %d, new curr pos:%d, new size: %d \n\r",pos1,g_userdata_currpos,g_userdata.size);
+ 
   if(cond==true)
   {// add ids to history buffer
       vf_add_buff_adv_hist3(ids);
@@ -2501,13 +2525,14 @@ uint8_t vf_add_packet_to_buffer3(uint8_array_t *br_data)
         pos=i;
         if( g_userdata.size==0)
         {
-          g_userdata.p_data[pos*32+1]=g_userdata.p_data[pos*32+2]=0xFF; 
+          g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]=g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+2]=0xFF; //pointer to next and previous block
           g_userdata_currpos=g_userdata_lastpos=g_userdata_firstpos=pos;
         }
         else
         {
-          g_userdata.p_data[g_userdata_lastpos*32+1]=pos; //update previous "next block pointer"
-          g_userdata.p_data[pos*32+2]=g_userdata_lastpos; //update current "pre block pointer"
+          g_userdata.p_data[g_userdata_lastpos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]=pos; //update previous "next block pointer"
+          g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+2]=g_userdata_lastpos; //update current "pre block pointer"
+          g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]=0xFF; //pointer to next block is NULL
           g_userdata_lastpos=pos; //update last position
         }
         g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE]=0xFF;  //mark as used block
@@ -2521,7 +2546,7 @@ uint8_t vf_add_packet_to_buffer3(uint8_array_t *br_data)
 
   if (err_code==0)
   {
-       uart_printf("add data to buffer @%d $%d $%d *",g_userdata.size,g_userdata_lastpos,userdata->size); 
+       uart_printf("add data to buffer firstpos:%d, currpos:%d, lastpos:$%d buffsize:$%d *",g_userdata_firstpos,g_userdata_currpos,g_userdata_lastpos,g_userdata.size); 
        for(i=0;i<userdata->size+1+4;i++)
        {
           uart_printf("%d ", g_userdata.p_data[g_userdata_lastpos*MAX_USERDATA_BUFFER_BLOCKSIZE+i]);
@@ -3193,5 +3218,3 @@ int main(void)
         power_manage();
     }
 }
-
-
