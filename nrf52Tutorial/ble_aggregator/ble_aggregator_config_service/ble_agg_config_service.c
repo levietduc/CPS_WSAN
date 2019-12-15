@@ -57,10 +57,15 @@
  * @param[in] p_agg_cfg_service     Nordic UART Service structure.
  * @param[in] p_ble_evt Pointer to the event received from BLE stack.
  */
+//vinh
+extern void uart_printf(const char *fmt, ...);
+
 static void on_connect(ble_agg_cfg_service_t * p_agg_cfg_service, ble_evt_t const * p_ble_evt)
 {
     if(p_ble_evt->evt.gap_evt.params.connected.role == BLE_GAP_ROLE_PERIPH)
     {
+
+    //vinh, phone connected
         p_agg_cfg_service->conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
     }
 }
@@ -75,6 +80,9 @@ static void on_disconnect(ble_agg_cfg_service_t * p_agg_cfg_service, ble_evt_t c
 {
     if(p_ble_evt->evt.gap_evt.params.connected.role == BLE_GAP_ROLE_PERIPH)
     {
+    //vinh
+      uart_printf("Disconnect in ble_agg_config_service -->phone \n\r");
+
         UNUSED_PARAMETER(p_ble_evt);
         p_agg_cfg_service->conn_handle = BLE_CONN_HANDLE_INVALID;
     }
@@ -233,7 +241,7 @@ static uint32_t rx_char_add(ble_agg_cfg_service_t * p_agg_cfg_service, const ble
                                            &p_agg_cfg_service->rx_handles);
 }
 
-
+//vinh, for phone connecting
 void ble_agg_cfg_service_on_ble_evt(ble_evt_t const * p_ble_evt, void * p_context)
 {
     if ((p_context == NULL) || (p_ble_evt == NULL))
@@ -246,6 +254,7 @@ void ble_agg_cfg_service_on_ble_evt(ble_evt_t const * p_ble_evt, void * p_contex
     switch (p_ble_evt->header.evt_id)
     {
         case BLE_GAP_EVT_CONNECTED:
+          //vinh, phone connected
             on_connect(p_agg_cfg_service, p_ble_evt);
             break;
 
@@ -254,11 +263,14 @@ void ble_agg_cfg_service_on_ble_evt(ble_evt_t const * p_ble_evt, void * p_contex
             break;
 
         case BLE_GATTS_EVT_WRITE:
+          //phone write
             on_write(p_agg_cfg_service, p_ble_evt);
             break;
 
         case BLE_GATTS_EVT_HVN_TX_COMPLETE:
         {
+            //phone response
+
             //notify with empty data that some tx was completed.
             ble_agg_cfg_service_evt_t evt = {
                     .type = BLE_AGG_CFG_SERVICE_EVT_TX_RDY,
@@ -333,10 +345,10 @@ uint32_t ble_agg_cfg_service_string_send(ble_agg_cfg_service_t * p_agg_cfg_servi
 
     memset(&hvx_params, 0, sizeof(hvx_params));
 
-    hvx_params.handle = p_agg_cfg_service->tx_handles.value_handle;
+    hvx_params.handle = p_agg_cfg_service->tx_handles.value_handle; //vinh, where is the initialization?
     hvx_params.p_data = p_string;
     hvx_params.p_len  = p_length;
     hvx_params.type   = BLE_GATT_HVX_NOTIFICATION;
 
-    return sd_ble_gatts_hvx(p_agg_cfg_service->conn_handle, &hvx_params);
+    return sd_ble_gatts_hvx(p_agg_cfg_service->conn_handle, &hvx_params); //vinh note, recheck this function
 }

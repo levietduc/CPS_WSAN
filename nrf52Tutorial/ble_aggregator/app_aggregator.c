@@ -500,12 +500,13 @@ void vf_app_adv_data_send_to_phone(uint8_array_t *data)
   uint16_t thingy_id;
   
 
-  char str1[10]="Thingy",str2[10];
+  char str1[30]="Thingy",str2[10];
 
   thingy_id=data->p_data[0]<<8+ data->p_data[5];
   //sprintf(str2,"0x%x :",thingy_id);
   //strcat(str1,str2);
   uart_printf(str1); 
+  uart_printf(" to phone:");
 
 
 
@@ -520,7 +521,7 @@ void vf_app_adv_data_send_to_phone(uint8_array_t *data)
   switch(state)
   {
     case AGG_NODE_LINK_CONNECTED:
-        tx_command_payload[3] = 4; ;//type: 1:blinky 2:direct thingy; //3:remoted blinky; 4:remote thingy; 5:routing
+       tx_command_payload[3] = 4; ;//type: 1:blinky 2:direct thingy; //3:remoted blinky; 4:remote thingy; 5:routing
         tx_command_payload[4] =  8; //length
         tx_command_payload[5]=data->p_data[3]; //hopcounts
         tx_command_payload[6] = data->p_data[6]; //temp1
@@ -541,7 +542,6 @@ void vf_app_adv_data_send_to_phone(uint8_array_t *data)
         {
             tx_command_payload_length = 13;
         }
-
         break;
 
     case AGG_NODE_LINK_DISCONNECTED:
@@ -549,7 +549,7 @@ void vf_app_adv_data_send_to_phone(uint8_array_t *data)
         break;
 
     case AGG_NODE_LINK_DATA_UPDATE:
-        tx_command_payload[3] = 4; ;//type: 1:blinky 2:direct thingy; //3:remoted blinky; 4:remote thingy; 5:routing
+       tx_command_payload[3] = 4; ;//type: 1:blinky 2:direct thingy; //3:remoted blinky; 4:remote thingy; 5:routing
         tx_command_payload[4] =  8; //length
         tx_command_payload[5]=data->p_data[3]; //hopcounts
         tx_command_payload[6] = data->p_data[6]; //temp1
@@ -570,16 +570,6 @@ void vf_app_adv_data_send_to_phone(uint8_array_t *data)
         {
             tx_command_payload_length = 13;
         }
-//        tx_command_payload[3] =  8; //length
-//        tx_command_payload[4]=data->p_data[3]; //hopcounts
-//        tx_command_payload[5] = data->p_data[6]; //temp1
-//        tx_command_payload[6] = data->p_data[7];; //temp2
-//        tx_command_payload[7] =  data->p_data[8]; //pressure 1
-//        tx_command_payload[8] =  data->p_data[9];; //pressure 2
-//        tx_command_payload[9] = data->p_data[10];; //hum 1
-//        tx_command_payload[10] =  data->p_data[11];; //hum 2
-//        tx_command_payload[11] =  data->p_data[12];; //button
-//        tx_command_payload_length=12;
         break;
   }
 
