@@ -74,6 +74,7 @@ NRF_SDH_BLE_OBSERVERS(_name ## _obs,                                            
                       ble_thingy_uis_c_on_ble_evt, &_name, _cnt)
 
 
+
 #define THINGY_UIS_UUID_BASE        {0x42, 0x00, 0x74, 0xA9, 0xFF, 0x52, 0x10, 0x9B, 0x33, 0x49, 0x35, 0x9B, 0x00, 0x01, 0x68, 0xEF}
 #define THINGY_UIS_UUID_SERVICE     0x0300
 #define THINGY_UIS_UUID_BUTTON_CHAR 0x0302
@@ -149,26 +150,12 @@ typedef struct
     uint16_t button_cccd_handle;  /**< Handle of the CCCD of the Button characteristic. */
     uint16_t button_handle;       /**< Handle of the Button characteristic as provided by the SoftDevice. */
     uint16_t led_handle;          /**< Handle of the LED characteristic as provided by the SoftDevice. */
-
-//vinh ver2
-    uint16_t pressure_cccd_handle;  /**< Handle of the CCCD of the Pressure characteristic. */
-    uint16_t pressure_handle;       /**< Handle of the Button characteristic as provided by the SoftDevice. */
-    uint16_t temperature_cccd_handle;       
-    uint16_t temperature_handle;       
-    uint16_t humidity_cccd_handle;     
-    uint16_t humidity_handle;       
-    uint16_t gas_cccd_handle;     
-    uint16_t gas_handle; 
-    uint16_t color_cccd_handle;     
-    uint16_t color_handle; 
-
 } thingy_uis_db_t;
 
 /**@brief LED Button Event structure. */
 typedef struct
 {
 
-//vinh doing
     ble_thingy_uis_c_evt_type_t evt_type;    /**< Type of the event. */
     uint16_t             conn_handle; /**< Connection handle on which the event occured.*/
     union
@@ -195,14 +182,7 @@ struct ble_thingy_uis_c_s
     thingy_uis_db_t         peer_thingy_uis_db;  /**< Handles related to THINGY_UIS on the peer*/
     ble_thingy_uis_c_evt_handler_t evt_handler;  /**< Application event handler to be called when there is an event related to the LED Button service. */
     uint8_t                 uuid_type;    /**< UUID type. */
-    uint8_t                 colors[3];
-
-    //vinh ver2
-    uint8_t                 temperature[2];
-    uint8_t                 pressure[2];
-    uint8_t                 humidity[2];
-    uint8_t                 gas[2];
-   
+    uint8_t                 colors[3]; 
 };
 
 /**@brief LED Button Client initialization structure. */
