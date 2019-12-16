@@ -62,7 +62,7 @@
   <Watches active="0" update="Never"/>
  </Watch4>
  <Files>
-  <SessionOpenFile windowGroup="DockEditLeft" x="51" y="117" useTextEdit="1" useBinaryEdit="0" left="0" path="../../../main.c" selected="1" top="98" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="117" useTextEdit="1" useBinaryEdit="0" left="0" path="../../../main.c" selected="1" top="98" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="564" useTextEdit="1" useBinaryEdit="0" left="0" path="../../../app_aggregator.c" selected="0" top="538" codecName="Default"/>
  </Files>
  <ARMCrossStudioWindow activeProject="ble_aggregator_pca10040_s132" fileDialogDefaultFilter="*.c" autoConnectTarget="J-Link" buildConfiguration="Release" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="/Users/levietduc/CPS2019/nRF5_SDK/examples/CPS_WSAN_03/nrf52Tutorial/ble_aggregator" debugSearchPath="" autoConnectCapabilities="3199"/>
