@@ -86,7 +86,7 @@
 /*------------
 //student: CLuster head Configuration
 ----------*/
-#define CLUSTER_ID    10
+#define CLUSTER_ID    2
 #define DEVICE_NAME             "CH"                    /**< Name of device. Will be included in the advertising data. */
 #define SINK_ID         10       
 
@@ -138,15 +138,16 @@ static char const m_target_blinky_name[] = "Thingy";
 
 #define UUID16_SIZE                 2                                   /**< Size of a UUID, in bytes. */
 
-#define THINGY_RSSI_CONNECT_LIMIT   -50
-//vinh 
-#define CLUSTERHEAD_RSSI_CONNECT_LIMIT   -65
-#ifdef NRF52840_XXAA
-#define APP_DEFAULT_TX_POWER        8
+#if (CLUSTER_ID==SINK_ID)
+  #define THINGY_RSSI_CONNECT_LIMIT   -10
+  #define CLUSTERHEAD_RSSI_CONNECT_LIMIT   -110
+  #define APP_DEFAULT_TX_POWER        4
 #else
-#define APP_DEFAULT_TX_POWER        -20
+  #define THINGY_RSSI_CONNECT_LIMIT   -50
+  #define CLUSTERHEAD_RSSI_CONNECT_LIMIT   -110
+  #define APP_DEFAULT_TX_POWER        -40
 #endif
-
+ 
 #define MAX_USERDATA_BUFFER_BLOCK 16
 #define MAX_USERDATA_BUFFER_BLOCKSIZE 32
 
@@ -271,6 +272,7 @@ typedef struct struct_adv_history_buff_type
 }adv_history_buff_t;
 
 #define MAX_HIST_ADV_BUFF_SIZE 128
+//#define MAX_HIST_ADV_BUFF_SIZE 8
 adv_history_buff_t g_buff_adv_hist[MAX_HIST_ADV_BUFF_SIZE];
 uint8_t g_buff_adv_hist_size=0;
 uint8_t g_buff_adv_hist_firstpos=0,g_buff_adv_hist_lastpos=0;
@@ -286,7 +288,8 @@ typedef struct struct_thingy_data_type
   uint8_t link_state;
   uint8_t button;
   uint16_t  temperature;
-  uint16_t pressure;
+  //uint16_t pressure;
+  uint32_t pressure;
   uint16_t humidity;
 }thingy_data_t;
 
@@ -1448,7 +1451,7 @@ update:
 
 void vf_delete_block_buffer3(bool cond)
 {//remove current block to the chain
-  uint8_t pos,nextpos,prepos,pos1;
+  uint16_t pos,nextpos,prepos,pos1;
   size_t i;
   uint32_t ids;
 
@@ -1479,10 +1482,11 @@ void vf_delete_block_buffer3(bool cond)
 
        g_userdata.p_data[nextpos*MAX_USERDATA_BUFFER_BLOCKSIZE+2]= 0xFF; //NULL
        g_userdata_firstpos=nextpos;
-       if(g_userdata_currpos==pos1)
-       {
+       //vinh ver4
+       //if(g_userdata_currpos==pos1)
+       //{
           g_userdata_currpos=g_userdata_firstpos;
-       }
+       //}
 
     }
     else if (pos1==g_userdata_lastpos)
@@ -1493,10 +1497,11 @@ void vf_delete_block_buffer3(bool cond)
 
        g_userdata.p_data[prepos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]= 0xFF; //NULL
        g_userdata_lastpos=prepos;
-       if(g_userdata_currpos==pos1)
-       {
+       //vinh ver4
+       //if(g_userdata_currpos==pos1)
+       //{
           g_userdata_currpos=g_userdata_firstpos;
-       }
+       //}
     }
     else{
        nextpos=g_userdata.p_data[pos+1];
@@ -1506,10 +1511,10 @@ void vf_delete_block_buffer3(bool cond)
 
        g_userdata.p_data[nextpos*MAX_USERDATA_BUFFER_BLOCKSIZE+2]=prepos;
        g_userdata.p_data[prepos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]=nextpos;
-       if(g_userdata_currpos==pos1)
-       {
+       //vinh ver4if(g_userdata_currpos==pos1)
+       //{
           g_userdata_currpos=nextpos;
-       }
+       //}
 
     }
     g_userdata.size--;
@@ -1607,9 +1612,10 @@ void vf_relay_adv_data3(void* p_indata)
     uint8_t advlen=org_adv_data_size;
     static uint8_t relay_data[32];
     uint8_t relay_size;
+    size_t pos;
+//TODO: size=0 -> stop broadcast
 
-
-
+ 
     while(g_userdata.size>0) //check nubmer of used block
     {
           if(g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+4]==0)
@@ -1618,22 +1624,18 @@ void vf_relay_adv_data3(void* p_indata)
           }
           else
           {
-            //get position of data block to be transfered 
-            if(g_userdata_currpos==g_userdata_lastpos) //reach lastpos -> first pos 
-                g_userdata_currpos=g_userdata_firstpos;
-            else
-              g_userdata_currpos=g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+1];
-
-            relay_size= g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+4];
+          //vinh ver4
+            pos=g_userdata_currpos;   //get position of data block to be transfered 
+            relay_size= g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+4];
             relay_data[0]=relay_size;
             relay_data[1]=0xff; //type: MANUFACTURER  
-            memcpy(&relay_data[2],&g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+5],relay_size-1);
+            memcpy(&relay_data[2],&g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+5],relay_size-1);
             relay_data[5]++; //increase hop counts
 
             memcpy(&adv_packet.adv_data.p_data[advlen],relay_data,relay_size+1); //copy data to broadcast
             adv_packet.adv_data.len=org_adv_data_size+relay_size+1;
 
-            uart_printf("adv relay data (len)%d @%d, data: ",adv_packet.adv_data.len,g_userdata_currpos );
+            uart_printf("adv relay data (len)%d @%d, data: ",adv_packet.adv_data.len,pos );
             j++;
             for(int i=0;i<adv_packet.adv_data.len;i++)
             {
@@ -1641,20 +1643,25 @@ void vf_relay_adv_data3(void* p_indata)
             }
             uart_printf("\n\r");
 
-            if(--g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+3]==0)
+            if(--g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+3]==0)
             { // advertised more than 2 times, then move this block to history buffer
                 vf_delete_block_buffer3(true);
-                uart_printf("buffer state:currpos=%d, data:",g_userdata_currpos);
+                uart_printf("buffer state: new currpos=%d, data:",g_userdata_currpos);
                 for(i=0;i<MAX_USERDATA_BUFFER_BLOCK;i++)
                 {
                   uart_printf("%d ",g_userdata.p_data[i*MAX_USERDATA_BUFFER_BLOCKSIZE]);
                 }
                 uart_printf("\n\r");
             }
-
-
-
-           
+            else
+            {
+              //vinh ver4
+              if(g_userdata_currpos==g_userdata_lastpos) //reach lastpos -> first pos 
+                g_userdata_currpos=g_userdata_firstpos;
+              else
+                g_userdata_currpos=g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+1];
+              uart_printf("buffer state: new currpos=%d \n\r",g_userdata_currpos);
+            }
 
             break;
           }
@@ -1847,12 +1854,12 @@ static uint16_t vf_validate_relay_packet3(uint8_array_t *checkdata)
   //check current buffer
   if(g_userdata.size==0)
     return 0xFFFF;
-  else if(g_userdata.size==1)
+  else
   {
     uart_printf("ids in operating buffer: ");
     do
     {
-      uart_printf("0x%x ",i);
+      uart_printf("0x%x ,",i);
       temp_pos=pos*MAX_USERDATA_BUFFER_BLOCKSIZE+5; 
       cmpdata_pos=&g_userdata.p_data[temp_pos];
       cmp_data=((*cmpdata_pos)<<16)+((*(cmpdata_pos+1))<<8)+(*(cmpdata_pos+2));
@@ -1869,6 +1876,7 @@ static uint16_t vf_validate_relay_packet3(uint8_array_t *checkdata)
     }
     while (pos!=g_userdata_lastpos);
   }
+
   return 0xFFFF;
 }
 
@@ -1973,7 +1981,7 @@ void vf_add_edata_adv_buff_callback(void * p_context)
   int i;
   thingy_data_t thingy_data;
   int16_t temperature;
-  int16_t pressure;
+  int32_t pressure;
   int16_t humidity;
   uint8_t button_state;
   uint8_t arr_data[32];
@@ -2399,12 +2407,14 @@ void vf_adv_thingy_data(thingy_data_t *data)
 
         idata.p_data[6]=0x12;//temp1
         idata.p_data[7]=0x12;//temp1
-        idata.p_data[8]=0x34;//pressure1
-        idata.p_data[9]=0x56;//pressure2         
-        idata.p_data[10]=0x00;//hummi 1
-        idata.p_data[11]=0x78;//hummi 2
-        idata.p_data[12]=0x0;//button state
-        idata.size=13;
+        idata.p_data[8]=0x00;//pressure1
+        idata.p_data[9]=0x01;//pressure2 
+        idata.p_data[10]=0x02;//pressure3
+        idata.p_data[11]=0x03;//pressure4                
+        idata.p_data[12]=0x00;//hummi 1
+        idata.p_data[13]=0x78;//hummi 2
+        idata.p_data[14]=0x0;//button state
+        idata.size=15;
         break;
 
     case AGG_NODE_LINK_DISCONNECTED:
@@ -2414,12 +2424,15 @@ void vf_adv_thingy_data(thingy_data_t *data)
     case AGG_NODE_LINK_DATA_UPDATE:
         idata.p_data[6]=data->temperature>>8;//temp1
         idata.p_data[7]=(uint8_t)(data->temperature&0x00FF);//temp1
-        idata.p_data[8]=data->pressure>>8;//pressure1
-        idata.p_data[9]=(uint8_t)(data->pressure&0x00FF);//pressure2         
-        idata.p_data[10]=data->humidity>>8;//hummi 1
-        idata.p_data[11]=(uint8_t)(data->humidity&0x00FF);//hummi 2
-        idata.p_data[12]=data->button;//button state
-        idata.size=13;
+        idata.p_data[8]=data->pressure>>24;//pressure1 MSB
+        idata.p_data[9]=data->pressure>>16;//pressure2
+        idata.p_data[10]=data->pressure>>8;//pressure3
+        idata.p_data[11]=(uint8_t)(data->pressure&0x00FF);//pressure4  LSB                   
+
+        idata.p_data[12]=data->humidity>>8;//hummi 1
+        idata.p_data[13]=(uint8_t)(data->humidity&0x00FF);//hummi 2
+        idata.p_data[14]=data->button;//button state
+        idata.size=15;
         break;
   }
 
