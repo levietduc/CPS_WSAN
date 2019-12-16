@@ -76,6 +76,7 @@
 //vinh
 #include "nrf_delay.h"
 #include "ble_advertising.h"
+#include "ble_tes_c.h"
 
 #define APP_BLE_CONN_CFG_TAG      1                                     /**< A tag that refers to the BLE stack configuration we set with @ref sd_ble_cfg_set. Default tag is @ref APP_BLE_CONN_CFG_TAG. */
 #define APP_BLE_OBSERVER_PRIO     3                                     /**< Application's BLE observer priority. You shouldn't need to modify this value. */
@@ -137,15 +138,16 @@ static char const m_target_blinky_name[] = "Thingy";
 
 #define UUID16_SIZE                 2                                   /**< Size of a UUID, in bytes. */
 
-#define THINGY_RSSI_CONNECT_LIMIT   -60
-//vinh 
-#define CLUSTERHEAD_RSSI_CONNECT_LIMIT   -80
-#ifdef NRF52840_XXAA
-#define APP_DEFAULT_TX_POWER        8
+#if (CLUSTER_ID==SINK_ID)
+  #define THINGY_RSSI_CONNECT_LIMIT   -10
+  #define CLUSTERHEAD_RSSI_CONNECT_LIMIT   -110
+  #define APP_DEFAULT_TX_POWER        4
 #else
-#define APP_DEFAULT_TX_POWER        4                                   /**< Supported tx_power values: -40dBm, -20dBm, -16dBm, -12dBm, -8dBm, -4dBm, 0dBm, +3dBm and +4dBm.*/
+  #define THINGY_RSSI_CONNECT_LIMIT   -50
+  #define CLUSTERHEAD_RSSI_CONNECT_LIMIT   -110
+  #define APP_DEFAULT_TX_POWER        -40                               /**< Supported tx_power values: -40dBm, -20dBm, -16dBm, -12dBm, -8dBm, -4dBm, 0dBm, +3dBm and +4dBm.*/
 #endif
-
+ 
 #define MAX_USERDATA_BUFFER_BLOCK 16
 #define MAX_USERDATA_BUFFER_BLOCKSIZE 32
 
@@ -155,6 +157,10 @@ BLE_AGG_CFG_SERVICE_DEF(m_agg_cfg_service);                             /**< BLE
 
 BLE_LBS_C_ARRAY_DEF(m_lbs_c, NRF_SDH_BLE_CENTRAL_LINK_COUNT);           /**< LED Button client instances. */
 BLE_THINGY_UIS_C_ARRAY_DEF(m_thingy_uis_c, NRF_SDH_BLE_CENTRAL_LINK_COUNT);
+
+//vinh ver4, array for saving thingy enviromental service
+BLE_TES_C_ARRAY_DEF(m_thingy_tes_c, NRF_SDH_BLE_CENTRAL_LINK_COUNT);
+
 BLE_DB_DISCOVERY_ARRAY_DEF(m_db_disc, NRF_SDH_BLE_CENTRAL_LINK_COUNT);  /**< Database discovery module instances. */
 
 APP_TIMER_DEF(m_adv_led_blink_timer_id);
@@ -164,6 +170,7 @@ APP_TIMER_DEF(m_post_message_delay_timer_id);
 //vinh
 APP_TIMER_DEF(m_adv_timer_id);    //timer for changing advertising packet
 APP_TIMER_DEF(m_hist_refresh_timer_id);    //timer for delete an ID in history buffer 
+APP_TIMER_DEF(m_add_edata_adv_buff_timer_id);    //timer for add average enviroment data to broadcast buffer 
 
 //static volatile bool m_service_discovery_in_process = false;
 static char  m_target_clusterhead_name[20]=DEVICE_NAME;
@@ -243,6 +250,8 @@ static uint16_t vf_validate_relay_packet3(uint8_array_t *checkdata);
 @modify relay data by increasing TTL, byte[2] of input
 */
 static void vf_modify_relay_data(uint8_array_t *checkdata);
+
+static void vf_tes_c_evt_handler(ble_tes_c_t * p_tes_c, ble_tes_c_evt_t * p_tes_c_evt);
 //vinh
 //add for userdata
 #define MAX_USERDATA_BUFFER MAX_USERDATA_BUFFER_BLOCK*MAX_USERDATA_BUFFER_BLOCKSIZE
@@ -263,9 +272,15 @@ typedef struct struct_adv_history_buff_type
 }adv_history_buff_t;
 
 #define MAX_HIST_ADV_BUFF_SIZE 128
+//#define MAX_HIST_ADV_BUFF_SIZE 8
 adv_history_buff_t g_buff_adv_hist[MAX_HIST_ADV_BUFF_SIZE];
 uint8_t g_buff_adv_hist_size=0;
 uint8_t g_buff_adv_hist_firstpos=0,g_buff_adv_hist_lastpos=0;
+
+//vinh ver4
+ 
+thingy_edata_t g_thingy_edata[NRF_SDH_BLE_CENTRAL_LINK_COUNT];
+
 
 typedef struct struct_thingy_data_type
 {
@@ -273,7 +288,8 @@ typedef struct struct_thingy_data_type
   uint8_t link_state;
   uint8_t button;
   uint16_t  temperature;
-  uint16_t pressure;
+  //uint16_t pressure;
+  uint32_t pressure;
   uint16_t humidity;
 }thingy_data_t;
 
@@ -638,14 +654,7 @@ static void thingy_uis_c_evt_handler(ble_thingy_uis_c_t * p_thingy_uis_c, ble_th
             // Thingy UI service discovered. Enable notification of Button.
             err_code = ble_thingy_uis_c_button_notif_enable(p_thingy_uis_c);
             APP_ERROR_CHECK(err_code);
-
-            //vinh ver2
-            //err_code = ble_thingy_uis_c_enviroment_notif_enable(p_thingy_uis_c);
-            //APP_ERROR_CHECK(err_code);                        
-            err_code = ble_thingy_sensor_c_pressure_notif_enable(p_thingy_uis_c);
-            APP_ERROR_CHECK(err_code);
-
-            
+        
             ble_thingy_uis_led_set_constant(p_thingy_uis_c, 255, 255, 255);
             
             ble_gap_conn_params_t conn_params;
@@ -664,18 +673,24 @@ static void thingy_uis_c_evt_handler(ble_thingy_uis_c_t * p_thingy_uis_c, ble_th
         {
             // Forward the data to the app aggregator module
             //vinh change button -> send all sensor data
-            app_aggregator_on_blinky_data(p_thingy_uis_c_evt->conn_handle, p_thingy_uis_c_evt->params.button.button_state);
 
-            //vinh ver3
-            //send button state to sink
-            thingy_data.local_id=p_thingy_uis_c_evt->conn_handle;
-            thingy_data.link_state=AGG_NODE_LINK_DATA_UPDATE;
-            thingy_data.button=p_thingy_uis_c_evt->params.button.button_state;
-            vf_adv_thingy_data(&thingy_data);  //broadcast data to sink
-
-
-                //vinh doing
-        
+            if(g_is_sink==false)
+            {
+                g_thingy_edata[p_thingy_uis_c_evt->conn_handle].button=p_thingy_uis_c_evt->params.button.button_state;
+                //vinh ver3
+                //send button state to sink
+                thingy_data.local_id=p_thingy_uis_c_evt->conn_handle;
+                thingy_data.link_state=AGG_NODE_LINK_DATA_UPDATE;
+                thingy_data.button=p_thingy_uis_c_evt->params.button.button_state;
+                thingy_data.temperature= g_thingy_edata[p_thingy_uis_c_evt->conn_handle].temperature.avg;
+                thingy_data.pressure=g_thingy_edata[p_thingy_uis_c_evt->conn_handle].pressure.avg;
+                thingy_data.humidity=g_thingy_edata[p_thingy_uis_c_evt->conn_handle].humidity.avg;
+                vf_adv_thingy_data(&thingy_data);  //broadcast data to sink
+            }
+            else
+            {
+              app_aggregator_on_blinky_data(p_thingy_uis_c_evt->conn_handle, p_thingy_uis_c_evt->params.button.button_state);
+            }
         } break; // BLE_LBS_C_EVT_BUTTON_NOTIFICATION
 
         default:
@@ -779,7 +794,9 @@ static void on_adv_report(ble_evt_t const * p_ble_evt)
               {//found clusterhead name
                   found_clusterhead_data= true;
 
-                  uart_printf("find cluster head \n\r");//print to COM port
+                  //vinh
+                  uint32_t counter = app_timer_cnt_get();
+                  uart_printf("find cluster head @time:%d\n\r", counter);//print to COM port
 
                   //parse data
                   err_code = adv_report_parse(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA, &adv_data, &userdata);
@@ -941,12 +958,22 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
                         
                         err_code = ble_thingy_uis_c_handles_assign(&m_thingy_uis_c[p_gap_evt->conn_handle],
                                                                    p_gap_evt->conn_handle, NULL);
+
+
+                        NRF_LOG_INFO("Connected.");      
+                        err_code = ble_tes_c_handles_assign(&m_thingy_tes_c[p_gap_evt->conn_handle], p_gap_evt->conn_handle, NULL);
+                        APP_ERROR_CHECK(err_code);
+
+
                         //vinh ver2
                         if(g_is_sink==false)
                         {//advertise this new node to sink
                           thingy_data.local_id=p_gap_evt->conn_handle;
                           thingy_data.link_state=AGG_NODE_LINK_CONNECTED;
-
+                          thingy_data.button=0;
+                          thingy_data.temperature=0; 
+                          thingy_data.pressure=0;
+                          thingy_data.humidity=0;
                           vf_adv_thingy_data(&thingy_data);
                         //vf_adv_thingy_data(p_gap_evt,AGG_NODE_LINK_CONNECTED); //advertising to sink new thingy 
                         }
@@ -1001,8 +1028,6 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             // Handle links as a peripheral here
             else
             {//connected to phone
-                //vinh doing
-                g_is_sink=true;
 
                 m_per_con_handle = p_gap_evt->conn_handle;
                 NRF_LOG_INFO("Peripheral connection 0x%x established.", m_per_con_handle);    
@@ -1055,6 +1080,9 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
                 }
 
                 //vinh
+                uart_printf("Disconnect in main \n\r");
+
+                //vinh
                 if(g_is_sink==false)
                 {//advertise this new node to sink
                           thingy_data.local_id=p_gap_evt->conn_handle;
@@ -1073,7 +1101,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             {//phone disconnected
 
                 //vinh
-                g_is_sink=false;
+                //g_is_sink=false;
 
 
                 NRF_LOG_INFO("Peripheral connection disconnected (reason: 0x%x)", p_gap_evt->params.disconnected.reason);
@@ -1151,7 +1179,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
         case BLE_GATTC_EVT_TIMEOUT:
         {
           //vinh
-            g_is_sink=false;
+            //g_is_sink=false;
 
             // Disconnect on GATT Client timeout event.
             NRF_LOG_DEBUG("GATT Client Timeout.");
@@ -1163,7 +1191,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
         case BLE_GATTS_EVT_TIMEOUT:
         {
                 //vinh
-                g_is_sink=false;
+                //g_is_sink=false;
 
             // Disconnect on GATT Server timeout event.
             NRF_LOG_DEBUG("GATT Server Timeout.");
@@ -1226,6 +1254,24 @@ static void thingy_uis_c_init(void)
     for (uint32_t i = 0; i < NRF_SDH_BLE_CENTRAL_LINK_COUNT; i++)
     {
         err_code = ble_thingy_uis_c_init(&m_thingy_uis_c[i], &thingy_uis_c_init_obj);
+        APP_ERROR_CHECK(err_code);
+    }
+}
+
+
+/**@brief enviroment collector initialization. */
+static void thingy_tes_c_init(void)
+{
+
+
+    ret_code_t       err_code;
+    ble_tes_c_init_t thingy_tes_c_init_obj;
+
+    thingy_tes_c_init_obj.evt_handler = vf_tes_c_evt_handler;
+
+    for (uint32_t i = 0; i < NRF_SDH_BLE_CENTRAL_LINK_COUNT; i++)
+    {
+        err_code = ble_tes_c_init(&m_thingy_tes_c[i], &thingy_tes_c_init_obj);
         APP_ERROR_CHECK(err_code);
     }
 }
@@ -1405,7 +1451,7 @@ update:
 
 void vf_delete_block_buffer3(bool cond)
 {//remove current block to the chain
-  uint8_t pos,nextpos,prepos,pos1;
+  uint16_t pos,nextpos,prepos,pos1;
   size_t i;
   uint32_t ids;
 
@@ -1436,10 +1482,12 @@ void vf_delete_block_buffer3(bool cond)
 
        g_userdata.p_data[nextpos*MAX_USERDATA_BUFFER_BLOCKSIZE+2]= 0xFF; //NULL
        g_userdata_firstpos=nextpos;
-       if(g_userdata_currpos==pos1)
-       {
+
+       //vinh ver4
+       //if(g_userdata_currpos==pos1)
+       //{
           g_userdata_currpos=g_userdata_firstpos;
-       }
+       //}
 
     }
     else if (pos1==g_userdata_lastpos)
@@ -1450,10 +1498,12 @@ void vf_delete_block_buffer3(bool cond)
 
        g_userdata.p_data[prepos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]= 0xFF; //NULL
        g_userdata_lastpos=prepos;
-       if(g_userdata_currpos==pos1)
-       {
+      
+       //vinh ver4
+       //if(g_userdata_currpos==pos1)
+       //{
           g_userdata_currpos=g_userdata_firstpos;
-       }
+       //}
     }
     else{
        nextpos=g_userdata.p_data[pos+1];
@@ -1463,10 +1513,11 @@ void vf_delete_block_buffer3(bool cond)
 
        g_userdata.p_data[nextpos*MAX_USERDATA_BUFFER_BLOCKSIZE+2]=prepos;
        g_userdata.p_data[prepos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]=nextpos;
-       if(g_userdata_currpos==pos1)
-       {
+      
+       //vinh ver4if(g_userdata_currpos==pos1)
+       //{
           g_userdata_currpos=nextpos;
-       }
+       //}
 
     }
     g_userdata.size--;
@@ -1564,9 +1615,10 @@ void vf_relay_adv_data3(void* p_indata)
     uint8_t advlen=org_adv_data_size;
     static uint8_t relay_data[32];
     uint8_t relay_size;
+    size_t pos;
+//TODO: size=0 -> stop broadcast
 
-
-
+ 
     while(g_userdata.size>0) //check nubmer of used block
     {
           if(g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+4]==0)
@@ -1575,35 +1627,44 @@ void vf_relay_adv_data3(void* p_indata)
           }
           else
           {
-            //get position of data block to be transfered 
-            if(g_userdata_currpos==g_userdata_lastpos) //reach lastpos -> first pos 
-                g_userdata_currpos=g_userdata_firstpos;
-            else
-              g_userdata_currpos=g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+1];
-
-            relay_size= g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+4];
+          //vinh ver4
+            pos=g_userdata_currpos;   //get position of data block to be transfered 
+            relay_size= g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+4];
             relay_data[0]=relay_size;
             relay_data[1]=0xff; //type: MANUFACTURER  
-            memcpy(&relay_data[2],&g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+5],relay_size);
+            memcpy(&relay_data[2],&g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+5],relay_size-1);
             relay_data[5]++; //increase hop counts
 
             memcpy(&adv_packet.adv_data.p_data[advlen],relay_data,relay_size+1); //copy data to broadcast
             adv_packet.adv_data.len=org_adv_data_size+relay_size+1;
 
-            if(--g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+3]==0)
-            { // advertised more than 2 times, then move this block to history buffer
-                vf_delete_block_buffer3(true);
-            }
-
-
-            uart_printf("adv relay data (len)%d @%d",adv_packet.adv_data.len,g_userdata_currpos );
+            uart_printf("adv relay data (len)%d @%d, data: ",adv_packet.adv_data.len,pos );
             j++;
             for(int i=0;i<adv_packet.adv_data.len;i++)
             {
                 uart_printf("%d  ",adv_packet.adv_data.p_data[i] );
             }
             uart_printf("\n\r");
-           
+
+            if(--g_userdata.p_data[pos*MAX_USERDATA_BUFFER_BLOCKSIZE+3]==0)
+            { // advertised more than 2 times, then move this block to history buffer
+                vf_delete_block_buffer3(true);
+                uart_printf("buffer state: new currpos=%d, data:",g_userdata_currpos);
+                for(i=0;i<MAX_USERDATA_BUFFER_BLOCK;i++)
+                {
+                  uart_printf("%d ",g_userdata.p_data[i*MAX_USERDATA_BUFFER_BLOCKSIZE]);
+                }
+                uart_printf("\n\r");
+            }
+            else
+            {
+              //vinh ver4
+              if(g_userdata_currpos==g_userdata_lastpos) //reach lastpos -> first pos 
+                g_userdata_currpos=g_userdata_firstpos;
+              else
+                g_userdata_currpos=g_userdata.p_data[g_userdata_currpos*MAX_USERDATA_BUFFER_BLOCKSIZE+1];
+              uart_printf("buffer state: new currpos=%d \n\r",g_userdata_currpos);
+            }
 
             break;
           }
@@ -1614,43 +1675,6 @@ void vf_relay_adv_data3(void* p_indata)
    
 }
 
-//advertising to sink new thingy 
- /*void vf_adv_thingy_connected(ble_evt_t *p_gap_evt) 
-{
-//vinh doing
-ble_thingy_uis_c_evt_t * p_thingy
-
-
-
-  uint8_t data_arr[32],str1[20],i;
-  uint8_array_t idata;
-//vinh doing
-  idata.p_data=data_arr;
-  idata.p_data[0]=CLUSTER_ID; //cluster source id
-  idata.p_data[1]=10; //cluster destination id
-  idata.p_data[2]=g_packetID++; //packet No
-  idata.p_data[3]=0; //hop counts  
-  idata.p_data[4]=AGG_NODE_LINK_DATA_UPDATE; //link state 
-  idata.p_data[5]=p_thingy->conn_handle; //local id
-  idata.p_data[6]=12;//temp1
-  idata.p_data[7]=12;//temp1
-  idata.p_data[8]=34;//pressure1
-  idata.p_data[9]=56;//pressure2         
-  idata.p_data[10]=00;//hummi 1
-  idata.p_data[11]=78;//hummi 2
-  idata.size=12;
-
-  uart_printf(" Relay Received thingy data: ");
-  for(i=0;i<12;i++)
-  {
-    sprintf(str1,"%d ",idata.p_data[i]);
-    uart_printf(str1);
-  }
-  uart_printf("\r\n");
-  vf_add_packet_to_buffer2(&idata);
-  relay_adv_data2();
-
-}*/
 /*
 @brief: modify relay data by increasing TTL, byte[3] of input
 */
@@ -1824,20 +1848,27 @@ static uint16_t vf_validate_relay_packet3(uint8_array_t *checkdata)
   ids=((uint32_t)checkdata->p_data[0]<<16)+((uint32_t)checkdata->p_data[1]<<8)+(uint32_t)(checkdata->p_data[2]);
 
   //check history buffer
-  if (vf_find_id_buff_adv_hist3(ids)!=0xFFFF) return i+8000; //already in history buffer
+  if (vf_find_id_buff_adv_hist3(ids)!=0xFFFF)
+  {
+    uart_printf("find in history buffer: 0x%x \n\r", i);
+    return i+8000; //already in history buffer
 
+  }
   //check current buffer
   if(g_userdata.size==0)
     return 0xFFFF;
-  else if(g_userdata.size==1)
+  else
   {
+    uart_printf("ids in operating buffer: ");
     do
     {
+      uart_printf("0x%x ,",i);
       temp_pos=pos*MAX_USERDATA_BUFFER_BLOCKSIZE+5; 
       cmpdata_pos=&g_userdata.p_data[temp_pos];
       cmp_data=((*cmpdata_pos)<<16)+((*(cmpdata_pos+1))<<8)+(*(cmpdata_pos+2));
       if(cmp_data==ids)
       {
+        uart_printf("find in operating buffer: 0x%x \n\r", i);
         return pos;
       }
       else
@@ -1848,6 +1879,7 @@ static uint16_t vf_validate_relay_packet3(uint8_array_t *checkdata)
     }
     while (pos!=g_userdata_lastpos);
   }
+
   return 0xFFFF;
 }
 
@@ -1945,6 +1977,69 @@ uint16_t vf_find_id_buff_adv_hist3(uint32_t id)
   return 0xFFFF;
 }
 
+//vinh ver4
+void vf_add_edata_adv_buff_callback(void * p_context)
+{
+
+  int i;
+  thingy_data_t thingy_data;
+  int16_t temperature;
+  int32_t pressure;
+  int16_t humidity;
+  uint8_t button_state;
+  uint8_t arr_data[32];
+  uint8_array_t idata;
+  for(i=0;i<NRF_SDH_BLE_CENTRAL_LINK_COUNT;i++)
+  {
+
+    if(m_thingy_tes_c[i].conn_handle!=BLE_CONN_HANDLE_INVALID)
+    {
+      temperature=vf_ble_tes_average_temperature(&g_thingy_edata[i]);
+      pressure=vf_ble_tes_average_pressure(&g_thingy_edata[i]);
+      humidity=vf_ble_tes_average_humidity(&g_thingy_edata[i]);
+      button_state=g_thingy_edata[i].button;
+      if(g_is_sink==false)
+      {
+         //send button state to sink
+         thingy_data.local_id=m_thingy_tes_c[i].conn_handle;
+         thingy_data.link_state=AGG_NODE_LINK_DATA_UPDATE;
+         thingy_data.button=button_state;
+         thingy_data.temperature=temperature;
+         thingy_data.pressure=pressure;
+         thingy_data.humidity=humidity;
+         vf_adv_thingy_data(&thingy_data);  //add data to buffer
+         uart_printf("Thingy ENV handle:%d, i:%d \n\r", m_thingy_tes_c[i].conn_handle,i);
+
+      }
+      else
+      {
+
+// //       idata.p_data=arr_data;
+// //       //send local thingy data to phone
+//        idata.p_data[0]=CLUSTER_ID; //cluster source id
+//        idata.p_data[1]=SINK_ID; //cluster destination id
+//        idata.p_data[2]=g_packetID++; //packet No
+//        idata.p_data[3]=0; //hop counts  
+//        idata.p_data[4]=AGG_NODE_LINK_DATA_UPDATE; //link state 
+//        idata.p_data[5]=i; //local id
+//        idata.p_data[6]=(uint8_t)(temperature>>8);//temp1
+//        idata.p_data[7]=(uint8_t)(temperature&0x00FF);//temp1
+//        idata.p_data[8]=(uint8_t)(pressure>>8);//pressure1
+//        idata.p_data[9]=(uint8_t)(pressure&0x00FF);//pressure2         
+//        idata.p_data[10]=(uint8_t)(humidity>>8);//hummi 1
+//        idata.p_data[11]=(uint8_t)(humidity&0x00FF);//hummi 2
+//        idata.p_data[12]=0x0;//button state
+//        idata.size=13;
+//        vf_app_adv_data_send_to_phone(&idata);
+//        
+        //vinhstop
+      }
+    }
+  }
+  
+
+}
+
 /*----------
 @brief: search for position of id value (0x00AABBCC, AA: source id, BB: dest id, CC:packet id)
  in buffer advertising history
@@ -2029,7 +2124,7 @@ void vf_refresh_history_buff_callback(void * p_context)
     {
       for(i=g_buff_adv_hist_firstpos;i<MAX_HIST_ADV_BUFF_SIZE;i++)
       {
-          if( g_buff_adv_hist[j].TTL==0) break;
+          if( g_buff_adv_hist[i].TTL==0) break;
 
       }
       if(i!=MAX_HIST_ADV_BUFF_SIZE)
@@ -2133,6 +2228,7 @@ void vf_process_adv_command3(uint8_array_t *br_data)
   //if(g_is_sink==true) vinh doing
   uint32_t ids;
   ids=(((uint32_t)br_data->p_data[0])<<16)+(((uint32_t)br_data->p_data[1])<<8)+((uint32_t)br_data->p_data[2]);
+  uart_printf("ids:0x%x \n\r", ids);
 
   if(vf_validate_relay_packet3(br_data)==0xFFFF)
   {//new data
@@ -2314,12 +2410,14 @@ void vf_adv_thingy_data(thingy_data_t *data)
 
         idata.p_data[6]=0x12;//temp1
         idata.p_data[7]=0x12;//temp1
-        idata.p_data[8]=0x34;//pressure1
-        idata.p_data[9]=0x56;//pressure2         
-        idata.p_data[10]=0x00;//hummi 1
-        idata.p_data[11]=0x78;//hummi 2
-        idata.p_data[12]=0x0;//button state
-        idata.size=13;
+        idata.p_data[8]=0x00;//pressure1
+        idata.p_data[9]=0x01;//pressure2 
+        idata.p_data[10]=0x02;//pressure3
+        idata.p_data[11]=0x03;//pressure4                
+        idata.p_data[12]=0x00;//hummi 1
+        idata.p_data[13]=0x78;//hummi 2
+        idata.p_data[14]=0x0;//button state
+        idata.size=15;
         break;
 
     case AGG_NODE_LINK_DISCONNECTED:
@@ -2329,18 +2427,21 @@ void vf_adv_thingy_data(thingy_data_t *data)
     case AGG_NODE_LINK_DATA_UPDATE:
         idata.p_data[6]=data->temperature>>8;//temp1
         idata.p_data[7]=(uint8_t)(data->temperature&0x00FF);//temp1
-        idata.p_data[8]=data->pressure>>8;//pressure1
-        idata.p_data[9]=(uint8_t)(data->pressure&0x00FF);//pressure2         
-        idata.p_data[10]=data->humidity>>8;//hummi 1
-        idata.p_data[11]=(uint8_t)(data->humidity&0x00FF);//hummi 2
-        idata.p_data[12]=data->button;//button state
-        idata.size=13;
+        idata.p_data[8]=data->pressure>>24;//pressure1 MSB
+        idata.p_data[9]=data->pressure>>16;//pressure2
+        idata.p_data[10]=data->pressure>>8;//pressure3
+        idata.p_data[11]=(uint8_t)(data->pressure&0x00FF);//pressure4  LSB                   
+
+        idata.p_data[12]=data->humidity>>8;//hummi 1
+        idata.p_data[13]=(uint8_t)(data->humidity&0x00FF);//hummi 2
+        idata.p_data[14]=data->button;//button state
+        idata.size=15;
         break;
   }
 
 
-  uart_printf(" Relay Received thingy data: ");
-  for(i=0;i<12;i++)
+  uart_printf(" Add Thingy data to buffer: ");
+  for(i=0;i<idata.size;i++)
   {
     sprintf(str1,"%d ",idata.p_data[i]);
     uart_printf(str1);
@@ -2560,6 +2661,86 @@ uint8_t vf_add_packet_to_buffer3(uint8_array_t *br_data)
   return err_code;
 }
 
+/**@brief Handles events coming from the Thingy Environment central module.
+ */
+static void vf_tes_c_evt_handler(ble_tes_c_t * p_tes_c, ble_tes_c_evt_t * p_tes_c_evt)
+{
+    uint16_t connection_handle=p_tes_c_evt->conn_handle;
+    switch (p_tes_c_evt->evt_type)
+    {
+        case BLE_TES_C_EVT_DISCOVERY_COMPLETE:
+        {
+            ret_code_t err_code;
+
+           err_code = ble_tes_c_handles_assign(&m_thingy_tes_c[p_tes_c_evt->conn_handle],
+                                               p_tes_c_evt->conn_handle,
+                                               &p_tes_c_evt->params.peer_db);
+            uart_printf("Thingy Environment service discovered on conn_handle 0x%x.", p_tes_c_evt->conn_handle);
+
+            // Thingy Environment service discovered. Enable notification of sensor data.
+            err_code = ble_tes_c_temperature_notif_enable(p_tes_c);
+            APP_ERROR_CHECK(err_code);
+            err_code = ble_tes_c_pressure_notif_enable(p_tes_c);
+            APP_ERROR_CHECK(err_code);
+            err_code = ble_tes_c_humidity_notif_enable(p_tes_c);
+            APP_ERROR_CHECK(err_code);
+            //err_code = ble_tes_c_gas_notif_enable(p_tes_c);
+            //APP_ERROR_CHECK(err_code);
+            //err_code = ble_tes_c_color_notif_enable(p_tes_c);
+            //APP_ERROR_CHECK(err_code);
+//            err_code = ble_tes_c_config_notif_enable(p_tes_c);
+//            APP_ERROR_CHECK(err_code);
+            
+        } break; // BLE_TES_C_EVT_DISCOVERY_COMPLETE
+
+        case BLE_TES_C_EVT_TEMPERATURE_NOTIFICATION:
+        {
+            ble_tes_temperature_t temperature = p_tes_c_evt->params.value.temperature_data;
+            vf_ble_tes_add_sum_temperature(&g_thingy_edata[connection_handle],temperature);         
+
+            uart_printf("Got Thingy @%d temperature: %d,%d, sum:%d \n\r",p_tes_c_evt->conn_handle,\
+                    temperature.integer, temperature.decimal,g_thingy_edata[connection_handle].temperature);
+        } break; // BLE_TES_C_EVT_TEMPERATURE_NOTIFICATION
+        case BLE_TES_C_EVT_PRESSURE_NOTIFICATION:
+        {
+            ble_tes_pressure_t pressure = p_tes_c_evt->params.value.pressure_data;
+            vf_ble_tes_add_sum_pressure(&g_thingy_edata[connection_handle],pressure); 
+
+            uart_printf("Got Thingy @%d pressure: %d,%d \n\r",connection_handle, pressure.integer, pressure.decimal);
+        } break; // BLE_TES_C_EVT_PRESSURE_NOTIFICATION
+        case BLE_TES_C_EVT_HUMIDITY_NOTIFICATION:
+        {
+            ble_tes_humidity_t humidity = p_tes_c_evt->params.value.humidity_data;
+            vf_ble_tes_add_sum_humidity(&g_thingy_edata[connection_handle],humidity); 
+
+            uart_printf("Got Thingy @%d humidity: %d \n\r",connection_handle,humidity);
+        } break; // BLE_TES_C_EVT_HUMIDITY_NOTIFICATION
+        case BLE_TES_C_EVT_GAS_NOTIFICATION:
+        {
+            ble_tes_gas_t gas = p_tes_c_evt->params.value.gas_data;
+            uart_printf("Got C02: %d \n\r", gas.eco2_ppm);
+            uart_printf("Got organic components: %d \n\r", gas.tvoc_ppb);
+        } break; // BLE_TES_C_EVT_GAS_NOTIFICATION
+        case BLE_TES_C_EVT_COLOR_NOTIFICATION:
+        {
+            ble_tes_color_t color = p_tes_c_evt->params.value.color_data;
+            uart_printf("Got color. R%d, G%d, B%d, C%d \n\r", color.red, color.green, color.blue, color.clear);
+        } break; // BLE_TES_C_EVT_COLOR_NOTIFICATION
+        case BLE_TES_C_EVT_CONFIG_NOTIFICATION:
+        {
+            // No implementation. 
+        } break; // BLE_TES_C_EVT_CONFIG_NOTIFICATION
+
+        default:
+            // No implementation needed.
+            break;
+    }
+}
+
+
+
+
+
 /**@brief Function for setting up advertising data. */
 static void advertising_data_set(void)
 {
@@ -2597,26 +2778,6 @@ static void advertising_data_set(void)
     //student: initial advertising data
     org_adv_data_size=adv_packet.adv_data.len;  //mark the start position of datafield 
 
-    /*adv_packet.adv_data.p_data[org_adv_data_size+0]=19; //length
-    adv_packet.adv_data.p_data[org_adv_data_size+1]=0xff; //type
-    adv_packet.adv_data.p_data[org_adv_data_size+2]=CLUSTER_ID; //source
-    adv_packet.adv_data.p_data[org_adv_data_size+3]=SINK_ID; //destination
-    adv_packet.adv_data.p_data[org_adv_data_size+4]=0x3; //Packet_no
-    adv_packet.adv_data.p_data[org_adv_data_size+5]=0x0; //TTL
-    adv_packet.adv_data.p_data[org_adv_data_size+6]=0x1; //data 1
-    adv_packet.adv_data.p_data[org_adv_data_size+7]=0x1; //data 2
-    adv_packet.adv_data.p_data[org_adv_data_size+8]=0x1; //data 3
-    adv_packet.adv_data.p_data[org_adv_data_size+9]=0x1; //data 4
-    adv_packet.adv_data.p_data[org_adv_data_size+10]=0x1; //data 5
-    adv_packet.adv_data.p_data[org_adv_data_size+11]=0x1; //data 6
-    adv_packet.adv_data.p_data[org_adv_data_size+12]=0x1; //data 7
-    adv_packet.adv_data.p_data[org_adv_data_size+13]=0x1; //data 8
-    adv_packet.adv_data.p_data[org_adv_data_size+14]=0x1; //data 9
-    adv_packet.adv_data.p_data[org_adv_data_size+15]=0x1; //data 10
-    adv_packet.adv_data.p_data[org_adv_data_size+16]=0x1; //data 11
-    adv_packet.adv_data.p_data[org_adv_data_size+17]=0x1; //data 12
-    adv_packet.adv_data.p_data[org_adv_data_size+18]=0x1; //data 13
-    adv_packet.adv_data.p_data[org_adv_data_size+19]=0x1; //data 14*/
 
     memset(&adv_packet.adv_data.p_data[org_adv_data_size],0,20);
     adv_packet.adv_data.len=org_adv_data_size+20; //length
@@ -2658,7 +2819,7 @@ static void advertising_start(void)
     APP_ERROR_CHECK(err_code);
 
     //timer for delete a history id if history buffer
-    //err_code = app_timer_start(m_hist_refresh_timer_id, APP_TIMER_TICKS(1000), 0);
+    err_code = app_timer_start(m_hist_refresh_timer_id, APP_TIMER_TICKS(1000), 0);
     //APP_ERROR_CHECK(err_code);
 
 }
@@ -2907,6 +3068,8 @@ static void db_disc_handler(ble_db_discovery_evt_t * p_evt)
 
     ble_lbs_on_db_disc_evt(&m_lbs_c[p_evt->conn_handle], p_evt);
     ble_thingy_uis_on_db_disc_evt(&m_thingy_uis_c[p_evt->conn_handle], p_evt);
+    ble_tes_on_db_disc_evt(&m_thingy_tes_c[p_evt->conn_handle], p_evt);
+
 }
 
 
@@ -3079,7 +3242,8 @@ static void timer_init(void)
     err_code = app_timer_create(&m_adv_timer_id, APP_TIMER_MODE_REPEATED, vf_relay_adv_data3);
     err_code = app_timer_create(&m_hist_refresh_timer_id, APP_TIMER_MODE_REPEATED, vf_refresh_history_buff_callback);
 
-
+    //vinh ver4
+    err_code = app_timer_create(&m_add_edata_adv_buff_timer_id, APP_TIMER_MODE_REPEATED, vf_add_edata_adv_buff_callback);
 
 }
 
@@ -3163,6 +3327,13 @@ int main(void)
     g_buff_adv_hist_firstpos=g_buff_adv_hist_lastpos=0;
     g_buff_adv_hist_size=0;
 
+    memset(g_thingy_edata,0,sizeof(g_thingy_edata));
+
+    if(CLUSTER_ID==SINK_ID)
+      g_is_sink=true;
+    else
+      g_is_sink=false;
+
 
     log_init();
     timer_init();
@@ -3177,6 +3348,7 @@ int main(void)
     db_discovery_init();
     lbs_c_init();
     thingy_uis_c_init();
+    thingy_tes_c_init(); //vinh ver4, thingy enviroment sevice initial
     ble_conn_state_init();
     advertising_data_set();
     conn_params_init();
@@ -3195,6 +3367,8 @@ int main(void)
     }
     // Start scanning for peripherals and initiate connection to devices which  advertise.
     scan_start(false);
+    err_code = app_timer_start(m_add_edata_adv_buff_timer_id, APP_TIMER_TICKS(10000), 0); //timer for perodically updating Thingy data to phone
+    APP_ERROR_CHECK(err_code);
 
     // Start advertising
     advertising_start();
