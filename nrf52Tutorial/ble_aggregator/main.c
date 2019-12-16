@@ -86,7 +86,7 @@
 /*------------
 //student: CLuster head Configuration
 ----------*/
-#define CLUSTER_ID      10
+#define CLUSTER_ID      5
 #define DEVICE_NAME             "CH"                    /**< Name of device. Will be included in the advertising data. */
 #define SINK_ID         10       
 
@@ -2049,7 +2049,7 @@ void vf_add_edata_adv_buff_callback(void * p_context)
 void vf_refresh_history_buff_callback(void * p_context)
 {
   uint16_t i,j,count=0;
-  uint8_t str1[64]="delete hist buff:",str2[10];
+  uint8_t str1[432]="delete hist buff:",str2[10];
 
     if(g_buff_adv_hist_size==0) return;
 
