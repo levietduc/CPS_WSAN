@@ -86,7 +86,7 @@
 /*------------
 //student: CLuster head Configuration
 ----------*/
-#define CLUSTER_ID     1
+#define CLUSTER_ID      10
 #define DEVICE_NAME             "CH"                    /**< Name of device. Will be included in the advertising data. */
 #define SINK_ID         10       
 
