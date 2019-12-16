@@ -86,7 +86,7 @@
 /*------------
 //student: CLuster head Configuration
 ----------*/
-#define CLUSTER_ID    2
+#define CLUSTER_ID     10
 #define DEVICE_NAME             "CH"                    /**< Name of device. Will be included in the advertising data. */
 #define SINK_ID         10       
 
@@ -145,7 +145,7 @@ static char const m_target_blinky_name[] = "Thingy";
 #else
   #define THINGY_RSSI_CONNECT_LIMIT   -50
   #define CLUSTERHEAD_RSSI_CONNECT_LIMIT   -110
-  #define APP_DEFAULT_TX_POWER        -40
+  #define APP_DEFAULT_TX_POWER        -40                               /**< Supported tx_power values: -40dBm, -20dBm, -16dBm, -12dBm, -8dBm, -4dBm, 0dBm, +3dBm and +4dBm.*/
 #endif
  
 #define MAX_USERDATA_BUFFER_BLOCK 16
@@ -1482,6 +1482,7 @@ void vf_delete_block_buffer3(bool cond)
 
        g_userdata.p_data[nextpos*MAX_USERDATA_BUFFER_BLOCKSIZE+2]= 0xFF; //NULL
        g_userdata_firstpos=nextpos;
+
        //vinh ver4
        //if(g_userdata_currpos==pos1)
        //{
@@ -1497,6 +1498,7 @@ void vf_delete_block_buffer3(bool cond)
 
        g_userdata.p_data[prepos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]= 0xFF; //NULL
        g_userdata_lastpos=prepos;
+      
        //vinh ver4
        //if(g_userdata_currpos==pos1)
        //{
@@ -1511,6 +1513,7 @@ void vf_delete_block_buffer3(bool cond)
 
        g_userdata.p_data[nextpos*MAX_USERDATA_BUFFER_BLOCKSIZE+2]=prepos;
        g_userdata.p_data[prepos*MAX_USERDATA_BUFFER_BLOCKSIZE+1]=nextpos;
+      
        //vinh ver4if(g_userdata_currpos==pos1)
        //{
           g_userdata_currpos=nextpos;
@@ -3389,5 +3392,3 @@ int main(void)
         power_manage();
     }
 }
-
-
